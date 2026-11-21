@@ -1,0 +1,22 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const root=path.resolve(__dirname,'..');
+const ids=Object.fromEntries(['domain','address','approve','cancel','status'].map(k=>[k,{textContent:'',disabled:k==='approve',handlers:{},addEventListener(n,f){this.handlers[n]=f;}}]));
+const doc={getElementById:id=>ids[id]};
+const target='https://www.google.com/search?q=teams#hash';
+const location={hash:'#'+target,replace(url){this.replaced=url;}};
+const window={};window.top=window;window.self=window;
+const sent=[];
+const chrome={runtime:{sendMessage:async msg=>{sent.push(msg);return {ok:true};}},tabs:{getCurrent:async()=>({id:10}),remove:async()=>{}}};
+vm.runInNewContext(fs.readFileSync(path.join(root,'confirm.js'),'utf8'),{window,document:doc,location,chrome,URL,console});
+assert.equal(ids.approve.disabled,false);
+assert.equal(ids.domain.textContent,'www.google.com');
+(async()=>{
+  await ids.approve.handlers.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent[1])),{type:'confirm-visit',url:target});
+  assert.equal(ids.approve.disabled,true);
+  console.log('PASS: confirmation page only approves user-selected valid HTTP(S) URL.');
+})().catch(e=>{console.error(e);process.exitCode=1;});

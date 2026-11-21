@@ -1,0 +1,29 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const root = path.resolve(__dirname,'..');
+let listener = null;
+const sent=[];
+const window = {addEventListener:(type,fn) => {if(type==='click')listener=fn;}};
+window.top=window;
+const location={origin:'https://example.com',pathname:'/home',search:'',hash:''};
+const document={baseURI:'https://example.com/home'};
+const chrome={runtime:{sendMessage:async message=>{sent.push(message);return {ok:true};}}};
+vm.runInNewContext(fs.readFileSync(path.join(root,'page-click-guard.js'),'utf8'),{window,location,document,chrome,URL,console});
+assert.equal(typeof listener,'function');
+function click(raw,isTrusted=true){
+  const link = {nodeType:1,getAttribute:name=>name==='href'?raw:null,hasAttribute:()=>false};
+  link.closest=()=>link;
+  let prevented=false,stopped=false;
+  const evt={button:0,isTrusted,composedPath:()=>[link],preventDefault(){prevented=true;},stopImmediatePropagation(){stopped=true;}};
+  listener(evt);return {prevented,stopped};
+}
+assert.deepEqual(click('https://other.example/path'),{prevented:true,stopped:true});
+assert.deepEqual(JSON.parse(JSON.stringify(sent[0])),{type:'click-guard',url:'https://other.example/path',newTab:true});
+assert.deepEqual(click('/other'),{prevented:true,stopped:true});
+assert.deepEqual(click('#anchor'),{prevented:false,stopped:false});
+assert.deepEqual(click('mailto:test@example.com'),{prevented:false,stopped:false});
+assert.deepEqual(click('https://other.example/path',false),{prevented:false,stopped:false});
+console.log('PASS: in-browser trusted link clicks show confirmation in new tab; same-page anchors and nonweb schemes are preserved.');

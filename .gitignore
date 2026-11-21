@@ -1,0 +1,13 @@
+# No credentials belong in this client-side browser extension.
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+.secrets/
+node_modules/
+.DS_Store
+*.log
+coverage/

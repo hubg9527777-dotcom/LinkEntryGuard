@@ -1,0 +1,34 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const base = path.resolve(__dirname, '..');
+const source = fs.readFileSync(path.join(base, 'policy.js'), 'utf8');
+const context = vm.createContext({ URL });
+vm.runInContext(source + '\nthis.Policy = GuardPolicy;', context);
+const P = context.Policy;
+assert.equal(P.isWebUrl('https://example.com'), true);
+assert.equal(P.isWebUrl('https://'), false);
+assert.equal(P.isWebUrl('file:///tmp/a'), false);
+assert.equal(P.isWebUrl({}), false);
+assert.equal(P.isTeamsUrl('https://teams.microsoft.com/v2/'), true);
+assert.equal(P.isTeamsUrl('https://teams.cloud.microsoft/v2/'), true);
+assert.equal(P.isTeamsUrl('https://foo.teams.cloud.microsoft/a'), true);
+assert.equal(P.isTeamsUrl('https://teams.live.com/a'), true);
+assert.equal(P.isTeamsUrl('https://teams.microsoft.com.evil.com/a'), false);
+assert.equal(P.isTeamsUrl('http://teams.microsoft.com'), false);
+assert.equal(P.domainOnly('https://example.com/p?token=SECRET'), 'example.com');
+const manifest = JSON.parse(fs.readFileSync(path.join(base, 'manifest.json'), 'utf8'));
+assert.equal(manifest.manifest_version, 3);
+assert.equal(manifest.version,'1.0.0');
+assert.deepEqual(manifest.permissions, ['tabs','storage','declarativeNetRequest','webNavigation','alarms']);
+assert.ok(manifest.host_permissions.includes('https://*/*'));
+assert.ok(manifest.web_accessible_resources[0].resources.includes('confirm.html'));
+assert.ok(manifest.declarative_net_request.rule_resources.some(r=>r.id==='failsafe' && r.enabled));
+assert.ok(manifest.content_scripts[0].matches.includes('https://teams.cloud.microsoft/*'));
+assert.equal(manifest.content_scripts[0].run_at, 'document_start');
+for (const file of ['background.js','teams-guard.js','popup.js','policy.js','page-click-guard.js','confirm.js']) {
+  new vm.Script(fs.readFileSync(path.join(base,file),'utf8'), {filename:file});
+}
+console.log('PASS: manifest, URL validation, Teams host matching and JS syntax.');

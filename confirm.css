@@ -1,0 +1,19 @@
+:root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background:#f4f7f8; display:flex; align-items:center; justify-content:center; padding:24px; color:#1d2932; }
+.panel { background:#fff; box-shadow:0 18px 52px #1e35451c; border:1px solid #dce5e8; max-width:550px; width:100%; padding:32px; border-radius:18px; }
+.mark { font-size:38px; color:#177052; }
+h1 { font-size:24px; margin:12px 0; }
+.summary { line-height:1.65; color:#3d525f; }
+.target { background:#f1f5f4; padding:18px; border:1px solid #d7e6e0; border-radius:12px; margin-top:20px; }
+.target small { display:block; color:#536973; margin-bottom:9px; }
+.target strong { display:block; font-size:20px; overflow-wrap:anywhere; }
+.target p { font-size:13px; word-break:break-all; color:#52636a; line-height:1.45; max-height:90px; overflow:auto; }
+.caution { line-height:1.7; color:#5f4e35; font-size:14px; }
+.actions { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:24px; }
+button { cursor:pointer; font-weight:650; font-size:15px; padding:13px 8px; border-radius:10px; }
+button:disabled { cursor:not-allowed; opacity:.45; }
+.secondary { background:white; border:1px solid #cbd5da; color:#33434a; }
+.primary { background:#176f50; border:1px solid #176f50; color:#fff; }
+.status { min-height:23px; margin-top:16px; color:#ad3d32; font-size:13px; }
+.footer { text-align:center; color:#728089; font-size:12px; margin-top:18px; }
