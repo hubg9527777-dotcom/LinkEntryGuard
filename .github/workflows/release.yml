@@ -1,0 +1,56 @@
+name: Build and publish LinkEntryGuard
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Verify version and run tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="v$(node -p 'require("./manifest.json").version')"
+          if [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match manifest $expected"
+            exit 1
+          fi
+          for test_file in tests/*.js; do
+            node "$test_file"
+          done
+
+      - name: Package extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          zip -q -r "dist/LinkEntryGuard-${GITHUB_REF_NAME}.zip" \
+            manifest.json *.js *.css *.html icons rules README.md
+          unzip -t "dist/LinkEntryGuard-${GITHUB_REF_NAME}.zip" | tail -1
+          sha256sum "dist/LinkEntryGuard-${GITHUB_REF_NAME}.zip"
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/LinkEntryGuard-${GITHUB_REF_NAME}.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "LinkEntryGuard $GITHUB_REF_NAME" \
+            --generate-notes \
+            --latest
