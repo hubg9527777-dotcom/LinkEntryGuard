@@ -11,12 +11,18 @@ const ONE_TIME_PRIORITY = 100;
 const GRANT_MIN_ID = 10000;
 const GRANT_TTL_MS = 25000;
 const EVENT_KEY = 'leg_events';
+const UI_KEY = 'leg_ui';
+const DEFAULT_POSITION = Object.freeze({top:0,right:110});
+const DEFAULT_UI = Object.freeze({name:'未命名浏览器',show:true,position:DEFAULT_POSITION});
+const MAX_NAME_LENGTH = 24;
+const newConfirmationTabs = new Set();
 const MAX_EVENTS = 100;
 const CONFIRM_PREFIX = chrome.runtime.getURL('confirm.html') + '#';
 const activeGrants = new Map();
 let grantRuleId = GRANT_MIN_ID;
 let ruleQueue = Promise.resolve();
 let logQueue = Promise.resolve();
+let uiWriteQueue = Promise.resolve();
 let globalReady = false;
 let grantCleanupFault = false;
 let lastError = '';
@@ -26,10 +32,65 @@ const storageAccessReady = chrome.storage.local.setAccessLevel({ accessLevel: 'T
   .catch(async error => {
     // Chrome exposes storage.local to content scripts by default. Never write
     // navigation history if trusted-context isolation could not be enforced.
-    console.warn('[LEG] privacy isolation failed; persistent logging disabled', error);
+    console.warn('[LEG] privacy isolation failed; persistent logging disabled');
     try { await chrome.storage.local.remove(EVENT_KEY); } catch { /* diagnostic only */ }
   });
 
+function normalizeName(value) {
+  if (typeof value !== 'string') throw new Error('备注必须是文字');
+  const cleaned = value.replace(/[\u0000-\u001F\u007F\u202A-\u202E\u2066-\u2069]/g,' ').replace(/\s+/g,' ').trim();
+  return cleaned.slice(0, MAX_NAME_LENGTH) || DEFAULT_UI.name;
+}
+function normalizePosition(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) ||
+      !Number.isInteger(raw.top) || !Number.isInteger(raw.right) ||
+      raw.top < 0 || raw.top > 8192 || raw.right < 0 || raw.right > 8192 ||
+      Object.keys(raw).some(key => !['top','right'].includes(key))) {
+    throw new Error('悬浮标签位置无效');
+  }
+  return {top:raw.top,right:raw.right};
+}
+async function readUi() {
+  await storageAccessReady;
+  const data = await chrome.storage.local.get(UI_KEY);
+  const raw = data[UI_KEY];
+  return {
+    name: typeof raw?.name === 'string' ? normalizeName(raw.name) : DEFAULT_UI.name,
+    show: raw?.show !== false,
+    position: raw?.position === undefined ? {...DEFAULT_POSITION} :
+      (() => { try { return normalizePosition(raw.position); } catch { return {...DEFAULT_POSITION}; } })()
+  };
+}
+async function broadcastUi(state) {
+  try {
+    const tabs = await chrome.tabs.query({});
+    await Promise.allSettled(tabs.filter(tab => Number.isInteger(tab.id))
+      .map(tab => chrome.tabs.sendMessage(tab.id,{type:'leg-ui-changed',ui:state})));
+    // Extension pages (e.g. confirm.html) are not content-script targets.
+    // A separate extension-runtime message updates the label there as well.
+    await chrome.runtime.sendMessage({type:'leg-ui-changed',ui:state}).catch(() => {});
+  } catch { /* Newly opened pages will read the saved profile settings. */ }
+}
+function saveUi(changes) {
+  // Popup and floating labels in different tabs may update different fields at
+  // the same time. Serialize read/merge/write to prevent lost settings.
+  const task = uiWriteQueue.catch(() => {}).then(async () => {
+    const current = await readUi();
+    const next = {...current};
+    if (Object.hasOwn(changes,'name')) next.name = normalizeName(changes.name);
+    if (Object.hasOwn(changes,'show')) {
+      if (typeof changes.show !== 'boolean') throw new Error('显示状态无效');
+      next.show = changes.show;
+    }
+    if (Object.hasOwn(changes,'position')) next.position = normalizePosition(changes.position);
+    await chrome.storage.local.set({[UI_KEY]:next});
+    await broadcastUi(next);
+    updateActionTitle(next.name);
+    return next;
+  });
+  uiWriteQueue = task.catch(() => {});
+  return task;
+}
 function safeUrl(url) { return GuardPolicy.isWebUrl(url); }
 function host(url) { return GuardPolicy.domainOnly(url); }
 function exactRegex(url) {
@@ -51,7 +112,7 @@ function record(type, reason, url = '', stage = '') {
     const rows = Array.isArray(old[EVENT_KEY]) ? old[EVENT_KEY] : [];
     rows.unshift(entry);
     await chrome.storage.local.set({ [EVENT_KEY]: rows.slice(0, MAX_EVENTS) });
-  }).catch(error => console.warn('[LEG] event log failed', error));
+  }).catch(error => console.warn('[LEG] event log failed'));
 }
 function globalRule() {
   // Include complete URL in the fragment; no target HTTP(S) request occurs
@@ -120,7 +181,7 @@ async function installGlobalRuleNow() {
     globalReady = false;
     lastError = '请求前确认规则或静态兜底异常';
     record('error', 'rule-check-failed');
-    console.error('[LEG] protection health check failed', error);
+    console.error('[LEG] protection health check failed');
   }
   return globalReady;
 }
@@ -134,6 +195,17 @@ function installGlobalRule() {
     pendingGlobalRuleCheck = finished;
   }
   return pendingGlobalRuleCheck;
+}
+function updateActionTitle(name) {
+  const safe = typeof name === 'string' ? normalizeName(name) : DEFAULT_UI.name;
+  // Chrome internal/new-tab pages do not allow DOM badges. Keep the full note
+  // discoverable via the browser's native extension-icon tooltip instead.
+  // Tooltip failure must never turn a successful Profile setting save into
+  // an apparent failure, or interrupt startup network protections.
+  try {
+    const change = chrome.action.setTitle({title:`LinkEntryGuard · ${safe} · 链接访问保护`});
+    change?.catch?.(() => {});
+  } catch { /* Optional browser UI only; never affects the security rules. */ }
 }
 function refreshBadge(healthy) {
   chrome.action.setBadgeBackgroundColor({color:healthy?'#146d4b':'#b91c1c'}).catch(() => {});
@@ -180,7 +252,7 @@ async function clearGrant(tabId) {
     lastError = '单次放行规则撤销失败';
     record('error', 'allow-rule-removal-failed', old.url, 'cleanup');
     refreshBadge(false);
-    console.warn('[LEG] grant cleanup failed; retained for retry', error);
+    console.warn('[LEG] grant cleanup failed; retained for retry');
     throw error;
   }
   clearTimeout(old.timer);
@@ -204,7 +276,7 @@ async function cleanupExpired() {
     cleanupSucceeded = false;
     grantCleanupFault = true;
     lastError = '过期放行规则未能清理';
-    console.warn('[LEG] orphan cleanup failed', error);
+    console.warn('[LEG] orphan cleanup failed');
   }
   if (cleanupSucceeded) {
     grantCleanupFault = false;
@@ -255,7 +327,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const isNew = message.newTab === true;
     const navigate = isNew ? chrome.tabs.create({url:target, active:true}) :
       chrome.tabs.update(sender.tab.id,{url:target});
-    navigate.then(() => {
+    navigate.then(tab => {
+      if (isNew && Number.isInteger(tab?.id)) newConfirmationTabs.add(tab.id);
       record('prompt','page-click',message.url,'before-navigation');
       respond({ok:true});
     }).catch(() => respond({ok:false}));
@@ -268,6 +341,97 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     respond({ok:true});
     return false;
   }
+  if (message.type === 'get-ui') {
+    if (!(isPopup(sender) || isConfirm(sender) || isPageContent(sender) || isTeamsContent(sender))) return false;
+    readUi().then(ui => respond({ok:true,ui})).catch(() => respond({ok:false}));
+    return true;
+  }
+  if (message.type === 'save-ui') {
+    const popup = isPopup(sender);
+    const page = isPageContent(sender) || isTeamsContent(sender);
+    if (!(popup || page) || !message.changes || typeof message.changes !== 'object' ||
+        Array.isArray(message.changes) ||
+        Object.keys(message.changes).some(key => !['name','show','position'].includes(key)) ||
+        (!popup && Object.hasOwn(message.changes,'show'))) return false;
+    saveUi(message.changes).then(ui => respond({ok:true,ui})).catch(() => respond({ok:false}));
+    return true;
+  }
+  if (message.type === 'confirm-incognito') {
+    if (!isConfirm(sender) || !safeUrl(message.url) ||
+        sender.url.slice(CONFIRM_PREFIX.length) !== message.url) return false;
+    (async () => {
+      const source = await chrome.tabs.get(sender.tab.id);
+      if (source.url !== sender.url) throw new Error('确认页已失效');
+      const hasIncognitoAccess = await chrome.extension.isAllowedIncognitoAccess();
+      if (initialization) await initialization;
+      if (!(await checkGlobalRule())) throw new Error('保护规则异常，无法打开');
+      if (!hasIncognitoAccess) {
+        // Chrome lets an extension OPEN an incognito window without being
+        // allowed to READ or control its tabs. The API deliberately returns
+        // undefined in that case; it does not indicate an opening failure.
+        // The extension does not run in that private profile, so pass the
+        // explicitly user-approved destination directly to windows.create.
+        // Chrome policy may still disable incognito; the API then rejects.
+        try {
+          await chrome.windows.create({incognito:true, focused:true, url:message.url});
+        } catch {
+          throw new Error('Chrome 当前不允许创建无痕窗口');
+        }
+        record('approved','opened-incognito',message.url,'user-confirmed');
+        respond({ok:true});
+        if (newConfirmationTabs.delete(source.id)) {
+          chrome.tabs.remove(source.id).catch(()=>{});
+        } else {
+          chrome.tabs.update(source.id,{url:'about:blank'}).catch(()=>{});
+        }
+        return;
+      }
+      // With incognito access granted, the protection rule also applies to
+      // private tabs. Create a blank tab and install a tab-scoped grant first.
+      // Create a blank incognito tab first. Never pass the target URL to
+      // windows.create, because that would skip installation of its tab grant.
+      const created = await chrome.windows.create({incognito:true,focused:true,url:'about:blank'});
+      // Some Chromium builds return a newly created Window without its tabs
+      // populated. Query that window rather than incorrectly reporting a
+      // failure (or navigating an unverified tab).
+      let destination = created?.tabs?.[0];
+      if (!Number.isInteger(destination?.id) && created?.incognito &&
+          Number.isInteger(created?.id)) {
+        try {
+          const candidates = await chrome.tabs.query({windowId:created.id});
+          destination = candidates.find(t => t.incognito === true);
+        } catch { /* Chrome API unavailable; close blank window below. */ }
+      }
+      if (!created?.incognito || !Number.isInteger(destination?.id) ||
+          (Number.isInteger(destination.windowId) && destination.windowId !== created.id)) {
+        if (Number.isInteger(created?.id)) await chrome.windows.remove(created.id).catch(()=>{});
+        throw new Error('创建无痕窗口失败');
+      }
+      try {
+        await allowOnce(destination.id,message.url);
+      } catch (error) {
+        await chrome.windows.remove(created.id).catch(()=>{});
+        throw error;
+      }
+      record('approved','opened-incognito',message.url,'before-navigation');
+      // The source is a confirmation page. Never open the requested URL in it.
+      respond({ok:true});
+      if (newConfirmationTabs.delete(source.id)) {
+        chrome.tabs.remove(source.id).catch(()=>{});
+      } else {
+        // Do not destroy a long-lived tab if user pasted into its address bar.
+        chrome.tabs.update(source.id,{url:'about:blank'}).catch(()=>{});
+      }
+    })().catch(error => {
+      const reason = String(error?.message||'');
+      const known = ['确认页已失效',
+        '保护规则异常，无法打开','创建无痕窗口失败',
+        'Chrome 当前不允许创建无痕窗口',
+        '网址过长，无法创建安全的单次放行规则','该网址暂不支持精确单次放行'];
+      respond({ok:false,reason:known.includes(reason)?reason:'无痕打开失败，请重试'});
+    });
+    return true;
+  }
   if (message.type === 'confirm-visit') {
     if (!isConfirm(sender) || !safeUrl(message.url) ||
         sender.url.slice(CONFIRM_PREFIX.length) !== message.url) return false;
@@ -277,8 +441,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (initialization) await initialization;
       if (!(await checkGlobalRule())) throw new Error('全局拦截规则异常，已拒绝放行');
       await allowOnce(sender.tab.id,message.url);
+      newConfirmationTabs.delete(sender.tab.id);
       respond({ok:true});
-    })().catch(error => { console.warn('[LEG] confirmation rejected',error);
+    })().catch(error => { console.warn('[LEG] confirmation rejected');
       const message = String(error.message || '');
       const safeReasons = [
         '确认页已失效', '全局拦截规则异常，已拒绝放行',
@@ -304,6 +469,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   return false;
 });
 chrome.tabs.onRemoved.addListener(tabId => {
+  newConfirmationTabs.delete(tabId);
   runRules(() => clearGrant(tabId)).catch(() => {});
 });
 chrome.webNavigation.onCommitted.addListener(details => {
@@ -327,6 +493,8 @@ async function initialize() {
   await runRules(cleanupExpired);
   chrome.alarms.create('leg-expire-grants',{periodInMinutes:1}).catch(()=>{});
   refreshBadge(globalReady && !grantCleanupFault);
+  try { updateActionTitle((await readUi()).name); }
+  catch { updateActionTitle(DEFAULT_UI.name); }
 }
 // Listeners registered synchronously; DNR dynamic rules persist across restarts.
 let inFlightInitialization = null;
@@ -334,7 +502,7 @@ function startInitialization() {
   if (!inFlightInitialization) {
     const pending = initialize().catch(error => {
       globalReady = false;
-      console.error('[LEG] initialize',error);
+      console.error('[LEG] initialize failed');
     });
     const finished = pending.finally(() => {
       if (inFlightInitialization === finished) inFlightInitialization = null;

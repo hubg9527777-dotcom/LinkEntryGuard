@@ -1,24 +1,16 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LinkEntryGuard</title>
-  <link rel="stylesheet" href="popup.css">
-</head>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LinkEntryGuard</title><link rel="stylesheet" href="popup.css"></head>
 <body>
-  <header>
-    <div class="symbol">⛨</div>
-    <div><h1>LinkEntryGuard</h1><div class="tagline">全浏览器链接误打开保护</div></div>
-    <span class="tag" id="guardState">检测中</span>
-  </header>
+  <header><div class="appicon">✚</div><div><h1>LinkEntryGuard</h1><small>链接访问保护</small></div><strong id="guardState" class="state">检测中</strong></header>
   <main>
-    <section class="feature"><div class="featureTop"><strong>① Teams 网页点击保护</strong><span class="green">始终开启</span></div><p>阻止 Teams 网页中的超链接直接导航。复制链接后在地址栏粘贴访问。</p></section>
-    <section class="feature"><div class="featureTop"><strong>② 外部链接入口保护</strong><span class="amber">请求前确认</span></div><p>对 HTTP/HTTPS 主页面导航统一显示确认页，不依赖识别 Teams 或其他软件。手动粘贴网址也可能需要确认。仅本次网址放行，不设关闭开关。</p></section>
-    <div class="stats"><div><span id="teamsCount">0</span><small>Teams 已拦截</small></div><div><span id="externalCount">0</span><small>确认/提示次数</small></div></div>
-    <section class="history"><div class="historyTitle"><strong>最近拦截记录</strong><button id="clearLogs" type="button">清除记录</button></div><div id="events" class="events">正在读取记录…</div></section>
-    <div class="notice">不收集完整 URL、消息正文或密码；不联网。两项功能没有关闭开关；停用或卸载扩展才会停止运行。</div>
-  </main>
-  <script src="popup.js"></script>
-</body>
-</html>
+    <section class="panel">
+      <div class="switchRow"><div><strong>悬浮备注</strong><small>可显示的页面持续显示</small></div><label class="switch"><input id="showFloat" type="checkbox" aria-label="显示悬浮备注"><span class="track"></span></label></div>
+      <label class="fieldLabel" for="profileName">当前浏览器备注</label>
+      <input id="profileName" maxlength="24" type="text" placeholder="如：工作专用" autocomplete="off" spellcheck="false">
+      <div class="hintRow"><p class="hint">拖动调位置 · 双击改备注</p><button type="button" id="resetPosition" title="恢复悬浮标签初始位置">重置位置</button></div>
+      <div id="saveState" role="status" aria-live="polite" class="save"></div>
+    </section>
+    <div class="protection"><span>Teams 网页点击保护</span><b>默认启用</b></div>
+    <div class="protection"><span>网页访问前确认</span><b>默认启用</b></div>
+    <details><summary>拦截记录 <span class="counts"><span id="teamsCount">0</span> / <span id="externalCount">0</span></span></summary><div class="history"><div class="historyTitle"><strong>最近记录</strong><button type="button" id="clearLogs">清除</button></div><div id="events" class="events">读取中…</div></div></details>
+  </main><script src="popup.js"></script>
+</body></html>

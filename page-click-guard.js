@@ -14,8 +14,9 @@
       try {
         const url = new URL(raw, document.baseURI);
         if (!['https:', 'http:'].includes(url.protocol)) return null;
-        if (url.origin === location.origin && url.pathname === location.pathname &&
-            url.search === location.search && url.hash !== location.hash) return null;
+        // Preserve normal same-origin app navigation, including ChatGPT chat switching.
+        // Full network navigations are still guarded separately by DNR.
+        if (url.origin === location.origin) return null;
         return url.href;
       } catch { return null; }
     }

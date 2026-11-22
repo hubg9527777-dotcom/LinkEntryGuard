@@ -1,3 +1,18 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LinkEntryGuard · 访问确认</title><link rel="stylesheet" href="confirm.css"></head>
-<body><main class="panel"><div class="mark">⛨</div><h1>确认在此浏览器打开？</h1><p class="summary">这个 Chrome 配置启用了链接误打开保护。点击“允许本次访问”，目标网站才会打开。</p><div class="target"><small>准备访问</small><strong id="domain">正在检查网址…</strong><p id="address"></p></div><p class="caution">如果这是从 Teams、TIM、邮件或其他软件误点的链接，请选择取消。此确认只临时允许当前标签访问这个网址，不会建立永久白名单。</p><div class="actions"><button id="cancel" class="secondary">取消访问</button><button id="approve" class="primary" disabled>允许本次访问</button></div><div role="status" id="status" class="status" aria-live="polite"></div><p class="footer">手动在地址栏粘贴网址，也可能出现本确认页面。</p></main><script src="confirm.js"></script></body></html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LinkEntryGuard · 打开链接</title><link rel="stylesheet" href="confirm.css"></head>
+<body>
+  <main class="panel" aria-labelledby="heading">
+    <header class="header"><div class="brand"><span class="shield" aria-hidden="true">✚</span><span>LinkEntryGuard</span></div><span id="profileName" class="profile" title="当前浏览器备注">当前浏览器</span></header>
+    <h1 id="heading">打开链接</h1>
+    <section class="target" aria-label="目标网址"><div class="eyebrow">准备访问</div><strong id="domain">正在检查网址…</strong><div id="address" class="address"></div></section>
+    <div class="actions">
+      <button id="approve" class="normal" disabled>直接打开</button>
+      <button id="incognito" class="private" disabled><img src="icons/incognito.svg" width="21" height="21" alt="">无痕打开</button>
+    </div>
+    <button id="cancel" class="cancel">取消访问</button>
+    <div id="status" role="status" class="status" aria-live="polite"></div>
+  </main>
+  <script src="confirm.js"></script>
+  <script src="floating-label.js"></script>
+</body></html>

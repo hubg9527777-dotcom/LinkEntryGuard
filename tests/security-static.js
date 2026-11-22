@@ -1,0 +1,33 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+const read=name=>fs.readFileSync(path.join(root,name),'utf8');
+const manifest=JSON.parse(read('manifest.json'));
+assert.equal(manifest.manifest_version,3);
+assert.equal(manifest.version,'1.0.1');
+assert.ok(!manifest.externally_connectable,'external websites/extensions must not access message bridge');
+assert.equal(manifest.web_accessible_resources.length,1);
+assert.deepEqual(manifest.web_accessible_resources[0].resources,['confirm.html']);
+assert.equal(manifest.background.service_worker,'background.js');
+assert.match(read('confirm.html'), /src="floating-label\.js"/, 'confirmation page should display the same floating label');
+assert.match(read('popup.html'), /可显示的页面持续显示/, 'popup must describe realistic coverage');
+assert.match(read('background.js'), /show: raw\?\.show !== false/, 'new Profiles show floating note by default');
+assert.match(read('background.js'), /action\.setTitle/, 'full note stays available in toolbar tooltip on restricted pages');
+assert.match(read('floating-label.js'), /MutationObserver/, 'label must recover from root replacement');
+assert.ok(!manifest.permissions.includes('scripting'), 'must not add privileged arbitrary script injection for restricted pages');
+const scripts=['background.js','confirm.js','popup.js','floating-label.js','teams-guard.js','page-click-guard.js','policy.js'];
+for(const file of scripts){
+  const code=read(file);
+  assert.ok(!/\b(?:eval|Function)\s*\(/.test(code),file+' must not use dynamic code');
+  assert.ok(!/\.innerHTML\s*=/.test(code),file+' must not insert unsanitized HTML');
+  assert.ok(!/\b(?:fetch|XMLHttpRequest|WebSocket)\s*\(/.test(code),file+' must not upload browsing data');
+}
+const bg=read('background.js');
+assert.match(bg,/storage\.local\.setAccessLevel/);
+assert.match(bg,/uiWriteQueue/);
+assert.ok(!/console\.(?:warn|error)\([^\n]*?,\s*(?:error|e)\s*\)/.test(bg),'raw API errors must not be logged');
+assert.match(read('floating-label.js'),/event\.isTrusted&&\(event\.key===/);
+assert.match(read('popup.html'),/Teams 网页点击保护<\/span><b>默认启用/);
+console.log('PASS: packaged permissions, message surface, sensitive logging, trusted keyboard editing, and safe DOM sinks.');

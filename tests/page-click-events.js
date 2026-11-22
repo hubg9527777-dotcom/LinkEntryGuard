@@ -22,8 +22,9 @@ function click(raw,isTrusted=true){
 }
 assert.deepEqual(click('https://other.example/path'),{prevented:true,stopped:true});
 assert.deepEqual(JSON.parse(JSON.stringify(sent[0])),{type:'click-guard',url:'https://other.example/path',newTab:true});
-assert.deepEqual(click('/other'),{prevented:true,stopped:true});
+assert.deepEqual(click('/other'),{prevented:false,stopped:false},'same-origin app navigation is not interrupted');
+assert.deepEqual(click('https://example.com/c/another-chat'),{prevented:false,stopped:false});
 assert.deepEqual(click('#anchor'),{prevented:false,stopped:false});
 assert.deepEqual(click('mailto:test@example.com'),{prevented:false,stopped:false});
 assert.deepEqual(click('https://other.example/path',false),{prevented:false,stopped:false});
-console.log('PASS: in-browser trusted link clicks show confirmation in new tab; same-page anchors and nonweb schemes are preserved.');
+console.log('PASS: cross-origin clicks are confirmed; same-origin SPA/chat navigation and anchors stay smooth.');

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "LinkEntryGuard · 双重链接保护",
   "short_name": "LinkEntryGuard",
-  "description": "对受保护 Chrome 的 HTTP/HTTPS 主页面请求前确认；Teams 网页中的普通链接点击直接禁止。",
-  "version": "1.0.0",
+  "description": "防止链接误入当前 Chrome；访问前选择直接打开或无痕打开，支持浏览器备注。",
+  "version": "1.0.1",
   "minimum_chrome_version": "116",
   "permissions": [
     "tabs",
@@ -61,6 +61,17 @@
         "page-click-guard.js"
       ],
       "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "floating-label.js"
+      ],
+      "run_at": "document_idle",
       "all_frames": false
     }
   ],

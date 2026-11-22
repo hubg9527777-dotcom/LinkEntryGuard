@@ -21,14 +21,14 @@ assert.equal(P.isTeamsUrl('http://teams.microsoft.com'), false);
 assert.equal(P.domainOnly('https://example.com/p?token=SECRET'), 'example.com');
 const manifest = JSON.parse(fs.readFileSync(path.join(base, 'manifest.json'), 'utf8'));
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version,'1.0.0');
+assert.equal(manifest.version,'1.0.1');
 assert.deepEqual(manifest.permissions, ['tabs','storage','declarativeNetRequest','webNavigation','alarms']);
 assert.ok(manifest.host_permissions.includes('https://*/*'));
 assert.ok(manifest.web_accessible_resources[0].resources.includes('confirm.html'));
 assert.ok(manifest.declarative_net_request.rule_resources.some(r=>r.id==='failsafe' && r.enabled));
 assert.ok(manifest.content_scripts[0].matches.includes('https://teams.cloud.microsoft/*'));
 assert.equal(manifest.content_scripts[0].run_at, 'document_start');
-for (const file of ['background.js','teams-guard.js','popup.js','policy.js','page-click-guard.js','confirm.js']) {
+for (const file of ['background.js','teams-guard.js','popup.js','policy.js','page-click-guard.js','confirm.js','floating-label.js']) {
   new vm.Script(fs.readFileSync(path.join(base,file),'utf8'), {filename:file});
 }
 console.log('PASS: manifest, URL validation, Teams host matching and JS syntax.');
