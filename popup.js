@@ -37,6 +37,7 @@ async function saveName(){
   try {
     const next=await setUi({name:current});
     savedName=next.name;
+    const identity=$('profileIdentity');if(identity){identity.textContent=savedName;identity.title=savedName;}
     if ($('profileName').value.trim()===current) $('profileName').value=savedName;
     $('saveState').textContent='';
   } catch { if ($('profileName').value.trim()===current) $('profileName').value=savedName; $('saveState').textContent='保存失败'; }
@@ -74,7 +75,7 @@ async function render() {
     for(const event of result.events.slice(0,25)) {
       const item=document.createElement('div');item.className='entry';
       const label=document.createElement('b');label.textContent=`${typeLabel(event.type)} · ${event.host||'未知域名'}`;
-      const time=document.createElement('div');time.className='when';const reasons={'whitelist-auto':'白名单自动放行','confirmed-by-user':'手动确认','opened-incognito':'无痕打开','blacklist-spa':'黑名单 · 站内地址变化','allow-rule-removal-failed':'临时权限撤销失败','allow-rule-mismatch':'异常临时权限已撤销','rule-check-failed':'保护规则异常','page-click':'网页点击','network-or-manual-confirm':'访问前确认','teams-click':'Teams 点击'};time.textContent=[new Date(event.at).toLocaleString(),reasons[event.reason]].filter(Boolean).join(' · ');
+      const time=document.createElement('div');time.className='when';const reasons={'whitelist-auto':'白名单自动放行','confirmed-by-user':'手动确认','opened-incognito':'无痕打开','blacklist-spa':'黑名单 · 站内地址变化','allow-rule-removal-failed':'临时权限撤销失败','allow-rule-mismatch':'异常临时权限已撤销','rule-check-failed':'保护规则异常','page-click':'网页点击','network-or-manual-confirm':'访问前确认','after-recent-same-origin':'近期同源访问后再次确认','after-recent-cross-origin':'近期跨源访问后再次确认','automatic-loop-paused':'白名单多次自动打开已暂停','teams-click':'Teams 点击'};time.textContent=[new Date(event.at).toLocaleString(),reasons[event.reason]].filter(Boolean).join(' · ');
       item.append(label,time);container.appendChild(item);
     }
   } catch { if(seq!==renderSequence)return; $('guardState').textContent='异常';$('guardState').classList.add('unavailable');$('events').textContent='后台未响应'; }
@@ -82,6 +83,10 @@ async function render() {
 $('clearLogs').addEventListener('click',async()=>{
   try {const result=await LegUI.request({type:'clear-events'});if(!result?.ok)throw new Error();await render();}
   catch {$('events').textContent='清除失败';}
+});
+if (typeof LegUI.watchProfile==='function') LegUI.watchProfile(name=>{
+  const el=$('profileIdentity');if(!el)return;
+  el.textContent=name||'名称读取失败';el.title=el.textContent;
 });
 Promise.all([loadUi(),render()]);
 

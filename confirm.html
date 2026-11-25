@@ -3,12 +3,13 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LinkEntryGuard · 打开链接</title><link rel="stylesheet" href="confirm.css"><link rel="stylesheet" href="lists.css"></head>
 <body>
   <main class="panel" aria-labelledby="heading">
-    <header class="header"><div class="brand"><span class="shield" aria-hidden="true">✚</span><span>LinkEntryGuard</span></div><span id="profileName" class="profile" title="当前浏览器备注">当前浏览器</span></header>
+    <header class="header"><div class="brand"><span class="shield" aria-hidden="true">✚</span><span>LinkEntryGuard</span></div><span id="profileName" class="profile" title="当前浏览器名称">当前浏览器：读取中…</span></header>
     <h1 id="heading">打开链接</h1>
     <section class="target" aria-label="目标网址"><div class="eyebrow">准备访问</div><strong id="domain">正在检查网址…</strong><div id="address" class="address"></div></section>
-    <section id="listQuick" class="listQuick" aria-label="链接名单"><div class="listTop"><strong id="listState">名单检测中…</strong><button type="button" id="retryList" class="textButton" hidden>重试</button><button type="button" id="manageLists" class="textButton">管理名单</button></div><div id="listMatches" class="listMatches"></div><div id="listControls" hidden><label for="listScope">范围</label><select id="listScope"><option value="url">当前网址</option><option value="site">整个网站（同协议及域名）</option></select><input id="listNote" type="text" maxlength="80" placeholder="备注（选填）" aria-label="名单备注"><div class="listButtons"><button type="button" id="addWhite" class="whiteButton">加入白名单</button><button type="button" id="addBlack" class="blackButton">加入黑名单</button></div></div><div id="listFeedback" role="status" aria-live="polite"></div></section>
+    <p id="navigationHint" class="navigationHint" hidden></p>
+    <section id="listQuick" class="listQuick" aria-label="当前浏览器链接名单"><div class="listTop"><strong id="listState">名单检测中…</strong><button type="button" id="retryList" class="textButton" hidden>重试</button><button type="button" id="manageLists" class="textButton">管理名单</button></div><div class="profilePolicy"><span class="policyWhite">白名单：当前浏览器自动打开</span><span class="policyBlack">黑名单：当前浏览器优先阻止</span><small>仅适用于本插件控制的访问；各 Chrome 个人资料名单独立。</small></div><div id="listMatches" class="listMatches"></div><div id="listControls" hidden><label for="listScope">范围</label><select id="listScope"><option value="url">当前网址</option><option value="site">整个网站（同协议及域名）</option></select><input id="listNote" type="text" maxlength="80" placeholder="备注（选填）" aria-label="名单备注"><div class="listButtons"><button type="button" id="addWhite" class="whiteButton">加入白名单</button><button type="button" id="addBlack" class="blackButton">加入黑名单</button></div></div><small class="listPrivacyHint">网址及备注在本机保存，请勿保存含敏感参数的网址。</small><div id="listFeedback" role="status" aria-live="polite"></div></section>
     <div class="actions">
-      <button id="approve" class="normal" disabled>直接打开</button>
+      <button id="approve" class="normal" disabled>在当前浏览器打开</button>
       <button id="incognito" class="private" disabled><img src="icons/incognito.svg" width="21" height="21" alt="">无痕打开</button>
     </div>
     <button id="cancel" class="cancel">取消访问</button>

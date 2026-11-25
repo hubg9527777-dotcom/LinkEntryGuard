@@ -1,7 +1,7 @@
 // Trusted extension UI only. Keep build ID in sync with background.js.
 'use strict';
 const LegUI = (() => {
-  const BUILD = '1.0.2-r20261125.2';
+  const BUILD = '1.0.2-r20261125.9';
   const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
   function error(code,reason){return Object.assign(new Error(reason),{code});}
   async function request(message,{read=false}={}) {
@@ -24,5 +24,20 @@ const LegUI = (() => {
     }
     throw last;
   }
-  return Object.freeze({BUILD,request});
+  function watchProfile(render) {
+    let sequence=0;
+    async function refresh(){
+      const seq=++sequence;
+      try {
+        const r=await request({type:'get-ui'},{read:true});
+        if(seq===sequence)render(typeof r.ui?.name==='string'&&r.ui.name.trim()?r.ui.name:'未命名浏览器');
+      }catch{if(seq===sequence)render(null);}
+    }
+    chrome.runtime.onMessage?.addListener((message,sender)=>{
+      if(sender?.id===chrome.runtime.id&&!sender.tab&&message?.type==='leg-ui-changed')refresh();
+    });
+    refresh();
+    return refresh;
+  }
+  return Object.freeze({BUILD,request,watchProfile});
 })();

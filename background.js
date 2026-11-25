@@ -1,6 +1,6 @@
 'use strict';
 importScripts('policy.js');
-const BUILD = '1.0.2-r20261125.2';
+const BUILD = '1.0.2-r20261125.9';
 let listError = '';
 const openingTabs = new Set();
 
@@ -14,6 +14,10 @@ const GLOBAL_PRIORITY = 10;
 const ONE_TIME_PRIORITY = 100;
 const GRANT_MIN_ID = 10000;
 const GRANT_TTL_MS = 25000;
+// Observational metadata only; never authorizes a request.
+const RECENT_VISIT_MS = 25000;
+const AUTO_WINDOW_MS = 30000, AUTO_LIMIT = 12, AUTO_REPEAT_LIMIT = 2, VISIT_LIMIT = 512;
+const recentVisits = new Map(), automaticVisits = new Map();
 const EVENT_KEY = 'leg_events';
 const UI_KEY = 'leg_ui';
 const PREFILL_KEY = 'leg_menu_prefill';
@@ -25,7 +29,6 @@ let listFault = true; // Unknown until the persisted policy has been verified.
 const DEFAULT_POSITION = Object.freeze({top:0,right:110});
 const DEFAULT_UI = Object.freeze({name:'未命名浏览器',show:true,position:DEFAULT_POSITION});
 const MAX_NAME_LENGTH = 24;
-const newConfirmationTabs = new Set();
 const MAX_EVENTS = 100;
 const CONFIRM_PREFIX = chrome.runtime.getURL('confirm.html') + '#';
 const activeGrants = new Map();
@@ -117,6 +120,35 @@ function exactRegex(url) {
   // Fragments are not part of network HTTP requests.
   const u = new URL(url); u.hash = '';
   return '^' + u.href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$';
+}
+function pruneVisits(now=Date.now()) {
+  for(const [id,v] of recentVisits) if(now-v.at>=RECENT_VISIT_MS)recentVisits.delete(id);
+  for(const [id,v] of automaticVisits) if(now-v.at>=AUTO_WINDOW_MS)automaticVisits.delete(id);
+}
+function rememberVisit(tabId,url,automatic) {
+  const now=Date.now();pruneVisits(now);
+  recentVisits.delete(tabId);recentVisits.set(tabId,{origin:new URL(url).origin,at:now});
+  if(!automatic)automaticVisits.delete(tabId);
+  else {
+    const old=automaticVisits.get(tabId)||{at:now,count:0,targets:new Map()};
+    const target=exactRegex(url);
+    old.count++;old.targets.set(target,(old.targets.get(target)||0)+1);
+    automaticVisits.set(tabId,old);
+  }
+  for(const map of [recentVisits,automaticVisits])while(map.size>VISIT_LIMIT)map.delete(map.keys().next().value);
+}
+function recentVisitHint(tabId,url) {
+  pruneVisits();const old=recentVisits.get(tabId);
+  if(!old||!safeUrl(url))return '';
+  return old.origin===new URL(url).origin?'same-origin':'cross-origin';
+}
+function guardAutomaticVisit(tabId,url,automatic) {
+  pruneVisits();
+  const prior=automaticVisits.get(tabId);
+  if(automatic&&prior&&(prior.count>=AUTO_LIMIT||(prior.targets.get(exactRegex(url))||0)>=AUTO_REPEAT_LIMIT)){
+    record('prompt','automatic-loop-paused',url,'before-navigation');
+    throw new Error('短时间内多次自动打开，已暂停；请核对网址后手动确认');
+  }
 }
 function runRules(fn) {
   const job = ruleQueue.catch(() => {}).then(fn);
@@ -432,6 +464,7 @@ async function clearGrant(tabId) {
   if (activeGrants.get(tabId) === old) activeGrants.delete(tabId);
 }
 async function cleanupExpired() {
+  pruneVisits();
   let cleanupSucceeded = true;
   const now = Date.now();
   for (const [tabId, state] of activeGrants) {
@@ -475,9 +508,8 @@ async function assertCurrentTab(tabId, expected) {
   return tab;
 }
 async function finishIncognitoSource(tabId, expected) {
-  try { await assertCurrentTab(tabId, expected); } catch { newConfirmationTabs.delete(tabId); return; }
-  if (newConfirmationTabs.delete(tabId)) await chrome.tabs.remove(tabId).catch(()=>{});
-  else await chrome.tabs.update(tabId,{url:'about:blank'}).catch(()=>{});
+  try { await assertCurrentTab(tabId, expected); } catch { return; }
+  await chrome.tabs.update(tabId,{url:'about:blank'}).catch(()=>{});
 }
 async function allowOnce(tabId, url, automatic = false, expected = null, sourceCheck = null) {
   return runRules(async () => {
@@ -485,6 +517,7 @@ async function allowOnce(tabId, url, automatic = false, expected = null, sourceC
     if (status === 'black') throw new Error('黑名单已阻止，请先移除规则');
     if (automatic && status !== 'white') throw new Error('白名单已变化，请手动确认');
     if (listFault) throw new Error('名单规则异常');
+    guardAutomaticVisit(tabId,url,automatic);
     await cleanupExpired();
     if(grantCleanupFault) throw new Error('临时放行清理失败');
     await clearGrant(tabId);
@@ -502,18 +535,29 @@ async function allowOnce(tabId, url, automatic = false, expected = null, sourceC
     };
     if (sourceCheck) await sourceCheck();
     if (expected !== null) await assertCurrentTab(tabId, expected);
-    await chrome.declarativeNetRequest.updateSessionRules({addRules:[entry]});
+    // Track the attempted grant even if the API fails; cleanup must cover
+    // uncertain installation outcomes as well as an unexpected read-back.
     const timer = setTimeout(() => {
       runRules(() => activeGrants.get(tabId)?.id===id ? clearGrant(tabId) : undefined).catch(() => {});
     }, GRANT_TTL_MS);
     activeGrants.set(tabId,{id,url,created:Date.now(),timer,rule:entry});
     try {
+      await chrome.declarativeNetRequest.updateSessionRules({addRules:[entry]});
+      const actual = await chrome.declarativeNetRequest.getSessionRules();
+      if (actual.length !== activeGrants.size || actual.some(r => ![...activeGrants.values()].some(g => g.id===r.id && JSON.stringify(stable(g.rule))===JSON.stringify(stable(r))))) {
+        record('error','allow-rule-mismatch',url,'before-navigation');
+        throw new Error('临时放行规则校验失败');
+      }
       if (sourceCheck) await sourceCheck();
       if (expected !== null) await assertCurrentTab(tabId, expected);
+      // Mark before dispatch, since the next confirmation may load immediately.
+      rememberVisit(tabId,url,automatic);
       await chrome.tabs.update(tabId,{url});
       record('approved',automatic?'whitelist-auto':'confirmed-by-user',url,'before-navigation');
     } catch (error) {
+      recentVisits.delete(tabId);
       await clearGrant(tabId);
+      await cleanupExpired();
       throw error;
     }
   });
@@ -559,7 +603,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const rows=await runRules(verifiedList);
       refreshBadge(globalReady && !grantCleanupFault && !listFault);
       if(message.type==='list-all'){const saved=(await chrome.storage.local.get(BACKUP_KEY))[BACKUP_KEY];return {ok:true,rows,backupAt:Number.isFinite(saved?.at)?saved.at:null};}
-      return {ok:true,...listStatus(rows,target)};
+      return {ok:true,...listStatus(rows,target),...(confirmPage?{recentVisit:recentVisitHint(sender.tab.id,target)}:{})};
     })().then(respond).catch(e=>respond({ok:false,code:listError||'LEG-15',reason:['名单最多300条','名单已变化，请刷新','只能修改当前网址','仅支持无凭据的 HTTP/HTTPS 网址','网址规则过长或不支持','确认页已失效','名单读取异常','名单规则异常','名单保存失败，请重试','名单格式无效','网址无效','路径规则须为非根目录且以 / 结尾，不含查询参数','名单数据重复','暂无备份','无效操作'].includes(e.message)?e.message:'名单操作失败，请重试'}));
     return true;
   }
@@ -568,35 +612,22 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (safeUrl(message.url)) record('teams','teams-click',message.url,'click');
     respond({ok:true}); return false;
   }
-  if (message.type === 'click-guard') {
-    if (!isPageContent(sender) || !safeUrl(message.url)) return false;
-    // Only navigation to an extension-owned confirmation page is permitted.
-    const target = CONFIRM_PREFIX + message.url;
-    const isNew = message.newTab === true;
-    const navigate = isNew ? chrome.tabs.create({url:target, active:true}) :
-      chrome.tabs.update(sender.tab.id,{url:target});
-    navigate.then(tab => {
-      if (isNew && Number.isInteger(tab?.id)) newConfirmationTabs.add(tab.id);
-      record('prompt','page-click',message.url,'before-navigation');
-      respond({ok:true});
-    }).catch(() => respond({ok:false}));
-    return true;
-  }
   if (message.type === 'confirm-seen') {
     if (!isConfirm(sender) || !safeUrl(message.url) ||
         sender.url.slice(CONFIRM_PREFIX.length) !== message.url) return false;
-    record('prompt','network-or-manual-confirm',message.url,'before-navigation');
+    const hint=recentVisitHint(sender.tab.id,message.url);
+    record('prompt',hint==='same-origin'?'after-recent-same-origin':hint==='cross-origin'?'after-recent-cross-origin':'network-or-manual-confirm',message.url,'before-navigation');
     respond({ok:true});
     return false;
   }
   if (message.type === 'get-ui') {
-    if (!(isPopup(sender) || isConfirm(sender) || isPageContent(sender) || isTeamsContent(sender))) return false;
+    if (!(isPopup(sender) || manager || isConfirm(sender) || isPageContent(sender) || isTeamsContent(sender))) return false;
     readUi().then(ui => respond({ok:true,ui})).catch(() => respond({ok:false}));
     return true;
   }
   if (message.type === 'save-ui') {
     const popup = isPopup(sender);
-    const page = isPageContent(sender) || isTeamsContent(sender) || isConfirm(sender);
+    const page = isPageContent(sender) || (isTeamsContent(sender) && sender.frameId===0) || isConfirm(sender);
     if (!(popup || page) || !message.changes || typeof message.changes !== 'object' ||
         Array.isArray(message.changes) ||
         Object.keys(message.changes).some(key => !['name','show','position'].includes(key)) ||
@@ -674,7 +705,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const known = ['黑名单已阻止，请先移除规则','确认页已失效',
         '保护规则异常，无法打开','创建无痕窗口失败','名单读取异常','名单规则异常',
         'Chrome 当前不允许创建无痕窗口',
-        '网址过长，无法创建安全的单次放行规则','该网址暂不支持精确单次放行'];
+        '网址过长，无法创建安全的单次放行规则','该网址暂不支持精确单次放行','临时放行规则校验失败'];
       respond({ok:false,reason:known.includes(reason)?reason:'无痕打开失败，请重试'});
     }).finally(()=>openingTabs.delete(sender.tab.id));
     return true;
@@ -689,14 +720,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (initialization) await initialization;
       if (!(await checkGlobalRule())) throw new Error('全局拦截规则异常，已拒绝放行');
       await allowOnce(sender.tab.id,message.url,message.automatic===true,sender.url);
-      newConfirmationTabs.delete(sender.tab.id);
       respond({ok:true});
     })().catch(error => { console.warn('[LEG] confirmation rejected');
       const message = String(error.message || '');
       const safeReasons = [
         '黑名单已阻止，请先移除规则','白名单已变化，请手动确认','名单读取异常','名单规则异常','确认页已失效', '全局拦截规则异常，已拒绝放行',
         '网址过长，无法创建安全的单次放行规则',
-        '该网址暂不支持精确单次放行'
+        '该网址暂不支持精确单次放行','临时放行规则校验失败',
+        '短时间内多次自动打开，已暂停；请核对网址后手动确认'
       ];
       respond({ok:false,reason:safeReasons.includes(message) ? message : '无法完成本次放行，请重试。'}); }).finally(()=>openingTabs.delete(sender.tab.id));
     return true;
@@ -721,7 +752,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   return false;
 });
 chrome.tabs.onRemoved.addListener(tabId => {
-  newConfirmationTabs.delete(tabId);
+  recentVisits.delete(tabId);automaticVisits.delete(tabId);
   runRules(() => clearGrant(tabId)).catch(() => {});
 });
 chrome.webNavigation.onCommitted.addListener(details => {
@@ -749,7 +780,7 @@ chrome.webNavigation.onHistoryStateUpdated?.addListener(details=>{
   runRules(async()=>{
     if(listStatus(await readList(),details.url).kind!=='black')return;
     const tab=await chrome.tabs.get(details.tabId);
-    if(tab.url!==details.url)return;
+    if(tab.url!==details.url||(tab.pendingUrl&&tab.pendingUrl!==details.url))return;
     await chrome.tabs.update(details.tabId,{url:CONFIRM_PREFIX+details.url});
     record('prompt','blacklist-spa',details.url,'after-history-change');
   }).catch(()=>{});
@@ -796,7 +827,7 @@ if(chrome.contextMenus){
   chrome.runtime.onInstalled.addListener(()=>{
     chrome.contextMenus.removeAll(()=>{
       if(chrome.runtime.lastError)return;
-      chrome.contextMenus.create({id:'leg-manage-link',title:'LinkEntryGuard · 管理链接名单',contexts:['link','page'],documentUrlPatterns:['http://*/*','https://*/*']},()=>{void chrome.runtime.lastError;});
+      chrome.contextMenus.create({id:'leg-manage-link',title:'LinkEntryGuard · 管理当前浏览器名单',contexts:['link','page'],documentUrlPatterns:['http://*/*','https://*/*']},()=>{void chrome.runtime.lastError;});
     });
   });
   chrome.contextMenus.onClicked.addListener(info=>{

@@ -20,3 +20,10 @@ LinkEntryGuard-lists*.json
 .git-credentials
 *.jks
 *.keystore
+
+# Local source / backup archives and private authentication configuration.
+*.zip
+*.tar.gz
+*.bak
+credentials.json
+secrets.json

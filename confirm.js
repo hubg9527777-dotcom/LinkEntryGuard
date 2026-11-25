@@ -18,14 +18,10 @@ if (window.top !== window.self) {
     if (!document.getElementById('listQuick')) { $('approve').disabled=false; $('incognito').disabled=false; }
     chrome.runtime.sendMessage({type:'confirm-seen',url:target}).catch(()=>{});
   } catch { $('status').textContent = '网址无效或过长'; }
-  chrome.runtime.sendMessage({type:'get-ui'}).then(response => {
-    if (response?.ok && typeof response.ui?.name==='string') {
-      $('profileName').textContent = response.ui.name;
-      // When enabled, the draggable chip above the panel already identifies
-      // the Profile. Avoid showing the same name twice in the confirmation UI.
-      $('profileName').hidden = response.ui.show === true;
-    }
-  }).catch(()=>{});
+  LegUI.watchProfile(name=>{
+    const el=$('profileName');
+    el.textContent='当前浏览器：'+(name||'名称读取失败');el.title=el.textContent;el.hidden=false;
+  });
 }
 $('cancel').addEventListener('click',async event=>{
   if(window.top!==window.self||event?.isTrusted===false||linkBusy)return;

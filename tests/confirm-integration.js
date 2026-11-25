@@ -60,7 +60,7 @@ vm.runInContext(fs.readFileSync(path.join(root,'background.js'),'utf8'),ctx);
 const pause=async()=>new Promise(r=>setTimeout(r,15));
 const send=(request,sender)=>new Promise(resolve=>{
   let settled=false;
-  const keep=rtMessage.emit({build:"1.0.2-r20261125.2",...request},sender,result=>{settled=true;resolve({handled:true,result});});
+  const keep=rtMessage.emit({build:"1.0.2-r20261125.9",...request},sender,result=>{settled=true;resolve({handled:true,result});});
   setTimeout(()=>{if(!settled) resolve({handled:false});},25);
 });
 (async()=>{
@@ -125,6 +125,11 @@ const send=(request,sender)=>new Promise(resolve=>{
   assert.ok(titles.some(x=>x.includes('测试 Profile')), 'native toolbar tooltip should contain current Profile note');
   assert.ok(uiBroadcasts.some(x=>x.type==='leg-ui-changed' && x.ui.name==='测试 Profile'), 'extension-owned confirmation page must receive settings broadcast');
   assert.equal((await send({type:'get-ui'},popupSender)).result.ui.name,'测试 Profile');
+  const identityManager={id:'test-extension',url:'chrome-extension://test-extension/lists.html',frameId:0};
+  assert.equal((await send({type:'get-ui'},identityManager)).result.ui.name,'测试 Profile');
+  assert.equal((await send({type:'get-ui'},{...identityManager,id:'foreign'})).handled,false);
+  assert.equal((await send({type:'get-ui'},{...identityManager,frameId:1})).handled,false);
+  assert.equal((await send({type:'save-ui',changes:{name:'不允许'}},identityManager)).handled,false);
   // Concurrent popup toggle + floating-note edit must not lose either field.
   await send({type:'save-ui',changes:{show:false,name:'并发前'}},popupSender);
   slowUiWrites = true;
@@ -202,11 +207,14 @@ const send=(request,sender)=>new Promise(resolve=>{
 
   tabs.set(2,{id:2,url:'https://example.com/dashboard'});
   const pageSender={id:'test-extension',tab:{id:2},url:tabs.get(2).url,frameId:0};
-  const click=await send({type:'click-guard',url:'https://example.com/path',newTab:true},pageSender);
-  assert.equal(click.result.ok,true);
-  assert.equal(tabs.get(2).url,'https://example.com/dashboard','original page should remain unchanged');
-  assert.ok(actions.at(-1).url.startsWith('chrome-extension://test-extension/confirm.html#'));
+  const beforeRetiredClick=actions.length;
+  assert.equal((await send({type:'click-guard',url:'https://example.com/path',newTab:true},pageSender)).handled,false,'retired DOM bridge must not create a second navigation');
+  assert.equal(actions.length,beforeRetiredClick);
+  assert.equal(tabs.get(2).url,'https://example.com/dashboard');
   assert.equal((await send({type:'click-guard',url:'javascript:alert(1)',newTab:true},pageSender)).handled,false);
+  for (const url of ['https://drive.google.com/?authuser=0','https://drive.google.com/drive/u/0/my-drive','https://about.google/intl/zh-CN/products/?tab=oh']) {
+    assert.ok(new RegExp(global.condition.regexFilter).test(url),'actual main-frame navigation remains guarded');
+  }
 
   const oldGrantId=10008;
   session.set(oldGrantId,{id:oldGrantId,action:{type:'allow'},condition:{tabIds:[99]}});
@@ -260,6 +268,9 @@ const send=(request,sender)=>new Promise(resolve=>{
   tabs.set(79,{id:79,url:'https://list.example/new'});
   historyChanged.emit({tabId:79,frameId:0,url:'https://list.example/new'});await pause();
   assert.equal(tabs.get(79).url,'chrome-extension://test-extension/confirm.html#https://list.example/new','SPA blacklist best effort');
+  tabs.set(179,{id:179,url:'https://list.example/new',pendingUrl:'https://other.test/next'});
+  historyChanged.emit({tabId:179,frameId:0,url:'https://list.example/new'});await pause();
+  assert.equal(tabs.get(179).url,'https://list.example/new','stale SPA check may not replace pending navigation');
   failListWrite=true;
   assert.equal((await send({type:'list-edit',op:'delete',key:'site|https://list.example'},mgr)).result.ok,false);
   assert.ok(Array.from(installed.values()).some(x=>x.id>=1000),'failed storage write restores black rule');
@@ -274,7 +285,7 @@ const send=(request,sender)=>new Promise(resolve=>{
   assert.equal((await send({type:'list-edit',op:'delete',key:'url|https://list.example/Account?mode=1'},mgr)).result.rows.length,0);
   assert.equal((await send({type:'list-status',url:ruleUrl},popupSender)).result.kind,'none');
   // 1.0.2: stale frontend, unreadable/corrupt lists and recovery without deleting data.
-  const build='1.0.2-r20261125.2';
+  const build='1.0.2-r20261125.9';
   const stale=await send({type:'list-status',url:ruleUrl,build:'older'},popupSender);
   assert.equal(stale.result.code,'LEG-01');assert.equal(stale.result.build,build);
   local.set('leg_lists_v1',[{kind:'black',scope:'url',url:'https://list.example/Account?mode=1',note:'保留'}]);
@@ -331,6 +342,19 @@ const send=(request,sender)=>new Promise(resolve=>{
   const staleOpen=await send({type:'confirm-visit',url:errorUrl},staleSender);
   assert.equal(staleOpen.result.ok,false);assert.equal(staleOpen.result.reason,'确认页已失效');
   assert.equal(tabs.get(84).url,errorConfirm);assert.equal(session.size,0);
+  // A successful API return is not a substitute for verifying the installed grant.
+  tabs.set(184,{id:184,url:errorConfirm});
+  afterGrantInstall=()=>{const [r]=session.values();session.set(r.id,{...r,condition:{...r.condition,tabIds:[184,185]}});};
+  const badGrant=await send({type:'confirm-visit',url:errorUrl},{...errorSender,tab:{id:184}});
+  assert.equal(badGrant.result.ok,false);assert.equal(badGrant.result.reason,'临时放行规则校验失败');
+  assert.equal(tabs.get(184).url,errorConfirm);assert.equal(session.size,0);
+  tabs.set(185,{id:185,url:errorConfirm});afterGrantInstall=()=>session.clear();
+  const missingGrant=await send({type:'confirm-visit',url:errorUrl},{...errorSender,tab:{id:185}});
+  assert.equal(missingGrant.result.ok,false);assert.equal(tabs.get(185).url,errorConfirm);assert.equal(session.size,0);
+  tabs.set(186,{id:186,url:errorConfirm});afterGrantInstall=()=>{throw new Error('injected uncertain install');};
+  const uncertainGrant=await send({type:'confirm-visit',url:errorUrl},{...errorSender,tab:{id:186}});
+  assert.equal(uncertainGrant.result.ok,false);assert.equal(tabs.get(186).url,errorConfirm);assert.equal(session.size,0,'uncertain install must still be cleaned');
+  assert.equal((await send({type:'save-ui',changes:{name:'iframe'}},{id:'test-extension',tab:{id:2},frameId:1,url:'https://teams.microsoft.com/v2/'})).handled,false);
   // Reject inactive confirmations and recover unexpected extension-owned rules.
   installed.set(42,{id:42,priority:1000,action:{type:'allow'},condition:{resourceTypes:['main_frame']}});
   session.set(43,{id:43,priority:1000,action:{type:'allow'},condition:{resourceTypes:['main_frame']}});
@@ -341,8 +365,51 @@ const send=(request,sender)=>new Promise(resolve=>{
   const altered=[...session.values()][0];session.set(altered.id,{...altered,priority:1000});
   assert.equal((await send({type:'get-status'},popupSender)).result.ready,true);
   assert.equal(session.size,0,'altered grant must be revoked');
+  // Continuity is observational only, never an origin-wide grant.
+  const chainOrigin='https://chain.test', first=chainOrigin+'/entry?secret=PRIVATE_CHAIN_TOKEN';
+  const makeConfirm=(id,url)=>{const address='chrome-extension://test-extension/confirm.html#'+url;tabs.set(id,{id,url:address});return {id:'test-extension',tab:{id},url:address,frameId:0};};
+  let chainSender=makeConfirm(180,first);
+  assert.equal((await send({type:'confirm-visit',url:first},chainSender)).result.ok,true);
+  const chainGrant=[...session.values()][0];
+  assert.ok(!new RegExp(chainGrant.condition.regexFilter).test(chainOrigin+'/next'),'same-origin hint cannot expand permission');
+  assert.deepEqual(Array.from(chainGrant.condition.tabIds),[180]);
+  committed.emit({tabId:180,frameId:0,url:first});await pause();
+  const next=chainOrigin+'/next';chainSender=makeConfirm(180,next);
+  assert.equal((await send({type:'list-status',url:next},chainSender)).result.recentVisit,'same-origin');
+  assert.equal((await send({type:'list-status',url:next},makeConfirm(181,next))).result.recentVisit,'');
+  assert.equal((await send({type:'confirm-visit',url:next,automatic:true},chainSender)).result.ok,false,'same-origin continuation must not bypass the whitelist check');
+  const other='https://chain.test:8443/next';
+  assert.equal((await send({type:'list-status',url:other},makeConfirm(180,other))).result.recentVisit,'cross-origin');
+  await send({type:'confirm-seen',url:other},makeConfirm(180,other));
+  removed.emit(180);await pause();
+  assert.equal((await send({type:'list-status',url:next},makeConfirm(180,next))).result.recentVisit,'');
+  // A normal chain of distinct white-listed URLs stays automatic; repeated URLs pause.
+  const chainRows=(await send({type:'list-all'},mgr)).result.rows;
+  const chainWhite={kind:'white',scope:'site',url:chainOrigin,note:''};
+  const chainBlack={kind:'black',scope:'url',url:chainOrigin+'/blocked',note:''};
+  assert.equal((await send({type:'list-edit',op:'batch',expected:chainRows,rows:[...chainRows,chainWhite,chainBlack]},mgr)).result.ok,true);
+  for(let i=0;i<6;i++){
+    const dest=chainOrigin+'/step'+i;const s=makeConfirm(182,dest);
+    assert.equal((await send({type:'confirm-visit',url:dest,automatic:true},s)).result.ok,true);
+    committed.emit({tabId:182,frameId:0,url:dest});await pause();
+  }
+  const loopDest=chainOrigin+'/step4';
+  assert.equal((await send({type:'confirm-visit',url:loopDest,automatic:true},makeConfirm(182,loopDest))).result.ok,true);
+  committed.emit({tabId:182,frameId:0,url:loopDest});await pause();
+  const loopSender=makeConfirm(182,loopDest);
+  const paused=await send({type:'confirm-visit',url:loopDest,automatic:true},loopSender);
+  assert.equal(paused.result.ok,false);assert.match(paused.result.reason,/多次自动打开/);assert.equal(session.size,0);await pause();
+  assert.equal((await send({type:'confirm-visit',url:chainOrigin+'/blocked',automatic:true},makeConfirm(182,chainOrigin+'/blocked'))).result.reason,'黑名单已阻止，请先移除规则');await pause();
+  assert.equal((await send({type:'confirm-visit',url:loopDest},makeConfirm(182,loopDest))).result.ok,true,'manual approval remains available');
+  committed.emit({tabId:182,frameId:0,url:loopDest});await pause();
+  assert.equal((await send({type:'confirm-visit',url:loopDest,automatic:true},makeConfirm(183,loopDest))).result.ok,true,'other tab is independent');
+  committed.emit({tabId:183,frameId:0,url:loopDest});await pause();
+  assert.equal(session.size,0);
+  assert.equal((await send({type:'list-edit',op:'batch',expected:[...chainRows,chainWhite,chainBlack],rows:chainRows},mgr)).result.ok,true);
   const log=JSON.stringify(local.get('leg_events'));
   assert.ok(!log.includes('teams%20url'),'logs must not persist URL paths');
+  assert.ok(!log.includes('PRIVATE_CHAIN_TOKEN'),'continuity diagnostics never persist query parameters');
+  assert.ok(log.includes('automatic-loop-paused'));
   assert.ok(!log.includes('#section'),'logs must not persist URL fragments');
   assert.equal((await send({type:'get-status'},pageSender)).handled,false);
   assert.equal((await send({type:'clear-events'},pageSender)).handled,false);

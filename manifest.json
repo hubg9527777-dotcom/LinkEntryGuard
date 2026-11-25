@@ -51,24 +51,6 @@
         "http://*/*",
         "https://*/*"
       ],
-      "exclude_matches": [
-        "https://teams.microsoft.com/*",
-        "https://*.teams.microsoft.com/*",
-        "https://teams.cloud.microsoft/*",
-        "https://*.teams.cloud.microsoft/*",
-        "https://teams.live.com/*"
-      ],
-      "js": [
-        "page-click-guard.js"
-      ],
-      "run_at": "document_start",
-      "all_frames": false
-    },
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
       "js": [
         "floating-label.js"
       ],
