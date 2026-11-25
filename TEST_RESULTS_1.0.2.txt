@@ -1,0 +1,49 @@
+LinkEntryGuard 1.0.2 / r20261125.2 — 2026-11-25
+v22.16.0
+Chromium 144.0.7559.96 built on Debian GNU/Linux 13 (trixie)
+Baseline: 15/15 original tests passed before changes.
+=== tests/always-visible.js
+PASS: extension/authorized-incognito note, restoration after DOM removal, user-off and state validation.
+=== tests/confirm-integration.js
+[LEG] grant cleanup failed; retained for retry
+[LEG] grant cleanup failed; retained for retry
+[LEG] confirmation rejected
+[LEG] confirmation rejected
+[LEG] confirmation rejected
+PASS: persisted intercept rule, fail-safe, one-time confirmation, exact URL, cleanup, source authorization, log privacy.
+=== tests/confirm-page.js
+PASS: confirmation page renders profile, offers distinct normal/incognito actions, restores buttons on errors.
+=== tests/floating-label-events.js
+PASS: floating label drag boundaries, pointer cancel, lost capture, blur, double-click editing and state sync.
+=== tests/list-quick-events.js
+PASS: quick list status, note prefilling, trusted editing, conversion, auto-open, removal and failure handling.
+=== tests/list-tools.js
+PASS: safe import, duplicate/conflict preservation, batch operations, directory scope and regex parity.
+=== tests/lists-manager-events.js
+PASS: actual manager scripts, preview before save, conflict retention, filtered selection, bulk conversion, undo and local test.
+=== tests/page-click-events.js
+PASS: cross-origin clicks are confirmed; same-origin SPA/chat navigation and anchors stay smooth.
+=== tests/popup-events.js
+PASS: popup toggle, per-profile note editing on blur, failures roll back, protection status visible.
+=== tests/privacy-failure.js
+PASS: privacy isolation failure disables log writes and removes prior log records.
+=== tests/release-safety.js
+PASS: pinned CI checkout, separate read-only tests, explicit release allowlist and all manifest/UI assets.
+=== tests/security-static.js
+PASS: packaged permissions, message surface, sensitive logging, trusted keyboard editing, and safe DOM sinks.
+=== tests/teams-events.js
+PASS: Teams link click, Ctrl/Shift-click, middle-click, keyboard, context menu, hash link and mouse down behavior.
+=== tests/test.js
+PASS: manifest, URL validation, Teams host matching and JS syntax.
+=== tests/ui-composed.js
+PASS: actual UI script order, shared transport, screenshot-like list failure, retry recovery, blacklist remains blocked.
+=== tests/ui-transport.js
+PASS: read retry, stale build identification, no automatic mutation replay.
+16/16 test files passed.
+JS syntax: PASS
+JSON / YAML / Bash syntax: PASS
+Real browser smoke: Chromium launched; local navigation returned ERR_BLOCKED_BY_ADMINISTRATOR; observed extension workers: []; incognito policy disabled. NOT PASSED / pending real Chrome.
+Secrets: pattern scan + review: no actual embedded secrets found; Git history not included.
+GitHub Actions remote execution: NOT RUN.
+Local Git archive packaging: PASS; 25 tracked runtime files verified byte-for-byte; ZIP CRC PASS.
+Install ZIP SHA-256: 9299f70e5dff7e6ef735698e668965c71af73b8ae227165dbfd0493ec8eb4e2f

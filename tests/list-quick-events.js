@@ -1,0 +1,25 @@
+'use strict';
+const assert=require('node:assert/strict');
+const vm=require('node:vm');const fs=require('node:fs');const path=require('node:path');
+class El{constructor(){this.handlers={};this.dataset={};this.children=[];this.value='';this.textContent='';this.disabled=false;this.hidden=false;}addEventListener(k,fn){this.handlers[k]=fn;}append(...xs){this.children.push(...xs);}replaceChildren(){this.children=[];}}
+const ids=Object.fromEntries(['retryList','listState','listMatches','listControls','listScope','listNote','listFeedback','addWhite','addBlack','manageLists','approve','incognito','cancel'].map(id=>[id,new El()]));ids.listScope.value='url';
+const url='https://sample.test/a';const events=[];let kind='black';let matches=[{kind,scope:'url',url,note:'备注一'}];let fail=false;
+const doc={getElementById:k=>ids[k],createElement:()=>new El()};const listeners={};const window={confirm:()=>{listeners.focus?.();return true;},addEventListener(k,fn){listeners[k]=fn;}};window.top=window.self=window;
+const chrome={runtime:{sendMessage:async m=>{events.push(m);if(fail)return {ok:false};if(m.type==='list-edit'){kind=m.op==='delete'?'none':m.rule.kind;matches=m.op==='delete'?[]:[m.rule];}return {ok:true,kind,matches};},getURL:x=>'chrome-extension://id/'+x},tabs:{create:async()=>{}}};let auto=0;
+const LegUI={request:async m=>{const r=await chrome.runtime.sendMessage(m);if(!r?.ok)throw new Error(r?.reason||'失败');return r;}};
+const ctx=vm.createContext({LegUI,document:doc,window,location:{pathname:'/confirm.html',hash:'#'+url},chrome,URL,openLink:async()=>{auto++;}});
+vm.runInContext(fs.readFileSync(path.join(__dirname,'..','list-quick.js'),'utf8'),ctx);
+const tick=()=>new Promise(r=>setImmediate(r));
+(async()=>{await tick();assert.equal(ids.approve.disabled,true);assert.equal(ids.incognito.disabled,true);assert.equal(ids.listNote.value,'备注一');assert.equal(auto,0);
+ids.addWhite.handlers.click({isTrusted:false});await tick();assert.equal(events.filter(x=>x.type==='list-edit').length,0);
+ids.listScope.value='site';ids.listScope.handlers.change();
+ids.addWhite.handlers.click({isTrusted:true});await tick();assert.equal(kind,'white');
+const edit=events.find(x=>x.type==='list-edit');assert.equal(edit.rule.scope,'site');assert.equal(edit.expectedMatches[0].kind,'black');
+assert.equal(events.filter(x=>x.type==='list-status').length,1,'native dialog focus must not start a competing refresh');assert.equal(ids.listState.dataset.kind,'white');assert.equal(ids.approve.disabled,false);
+await vm.runInContext('refreshQuick(true)',ctx);assert.equal(auto,1);
+const remove=ids.listMatches.children[0].children[1];remove.handlers.click({isTrusted:true});await tick();assert.equal(kind,'none');assert.equal(ids.listState.dataset.kind,'none');
+fail=true;await vm.runInContext('refreshQuick(false)',ctx);assert.equal(ids.approve.disabled,true);assert.equal(ids.incognito.disabled,true);assert.equal(ids.cancel.disabled,false);assert.equal(ids.retryList.hidden,false);
+fail=false;ids.retryList.handlers.click({isTrusted:true});await tick();assert.equal(ids.approve.disabled,false);assert.equal(ids.retryList.hidden,true);
+fail=true;ids.addBlack.handlers.click({isTrusted:true});await tick();assert.equal(ids.listState.textContent,'名单修改未确认');assert.equal(ids.approve.disabled,true);
+fail=false;ids.retryList.handlers.click({isTrusted:true});await tick();assert.equal(ids.approve.disabled,false);
+console.log('PASS: quick list status, note prefilling, trusted editing, conversion, auto-open, removal and failure handling.');})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -11,3 +11,12 @@ node_modules/
 .DS_Store
 *.log
 coverage/
+
+# Local exports and generated release packages must not be committed.
+dist/
+LinkEntryGuard-lists*.json
+.npmrc
+.netrc
+.git-credentials
+*.jks
+*.keystore

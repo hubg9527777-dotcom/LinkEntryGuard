@@ -5,42 +5,65 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
+permissions: {}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: Check out tagged source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-
       - name: Verify version and run tests
         shell: bash
         run: |
           set -euo pipefail
           expected="v$(node -p 'require("./manifest.json").version')"
-          if [ "$GITHUB_REF_NAME" != "$expected" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match manifest $expected"
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "Release tag does not match manifest version"
             exit 1
           fi
+          for source_file in *.js tests/*.js; do
+            node --check "$source_file"
+          done
           for test_file in tests/*.js; do
             node "$test_file"
           done
 
-      - name: Package extension
+  release:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the same tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Package extension from tracked files only
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           mkdir -p dist
-          zip -q -r "dist/LinkEntryGuard-${GITHUB_REF_NAME}.zip" \
-            manifest.json *.js *.css *.html icons rules README.md
+          git archive --format=zip --output="dist/LinkEntryGuard-${GITHUB_REF_NAME}.zip" HEAD -- \
+            manifest.json background.js policy.js page-click-guard.js teams-guard.js \
+            floating-label.js ui-transport.js confirm.html confirm.js confirm.css \
+            popup.html popup.js popup.css lists.html lists.js lists.css list-quick.js list-tools.js \
+            icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png icons/incognito.svg \
+            rules/failsafe.json README.md
           unzip -t "dist/LinkEntryGuard-${GITHUB_REF_NAME}.zip" | tail -1
           sha256sum "dist/LinkEntryGuard-${GITHUB_REF_NAME}.zip"
-
       - name: Publish GitHub Release
         shell: bash
         env:

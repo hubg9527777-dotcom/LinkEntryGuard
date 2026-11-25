@@ -6,7 +6,7 @@ const root=path.resolve(__dirname,'..');
 const read=name=>fs.readFileSync(path.join(root,name),'utf8');
 const manifest=JSON.parse(read('manifest.json'));
 assert.equal(manifest.manifest_version,3);
-assert.equal(manifest.version,'1.0.1');
+assert.equal(manifest.version,'1.0.2');
 assert.ok(!manifest.externally_connectable,'external websites/extensions must not access message bridge');
 assert.equal(manifest.web_accessible_resources.length,1);
 assert.deepEqual(manifest.web_accessible_resources[0].resources,['confirm.html']);
@@ -17,7 +17,7 @@ assert.match(read('background.js'), /show: raw\?\.show !== false/, 'new Profiles
 assert.match(read('background.js'), /action\.setTitle/, 'full note stays available in toolbar tooltip on restricted pages');
 assert.match(read('floating-label.js'), /MutationObserver/, 'label must recover from root replacement');
 assert.ok(!manifest.permissions.includes('scripting'), 'must not add privileged arbitrary script injection for restricted pages');
-const scripts=['background.js','confirm.js','popup.js','floating-label.js','teams-guard.js','page-click-guard.js','policy.js'];
+const scripts=['background.js','confirm.js','popup.js','floating-label.js','teams-guard.js','page-click-guard.js','policy.js','list-quick.js','lists.js','ui-transport.js','list-tools.js'];
 for(const file of scripts){
   const code=read(file);
   assert.ok(!/\b(?:eval|Function)\s*\(/.test(code),file+' must not use dynamic code');
@@ -25,6 +25,8 @@ for(const file of scripts){
   assert.ok(!/\b(?:fetch|XMLHttpRequest|WebSocket)\s*\(/.test(code),file+' must not upload browsing data');
 }
 const bg=read('background.js');
+assert.equal(bg.match(/const BUILD = '([^']+)'/)[1],read('ui-transport.js').match(/const BUILD = '([^']+)'/)[1]);
+for(const page of ['popup.html','confirm.html','lists.html'])assert.match(read(page),/<script src="ui-transport\.js"><\/script>/);
 assert.match(bg,/storage\.local\.setAccessLevel/);
 assert.match(bg,/uiWriteQueue/);
 assert.ok(!/console\.(?:warn|error)\([^\n]*?,\s*(?:error|e)\s*\)/.test(bg),'raw API errors must not be logged');

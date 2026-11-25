@@ -1,7 +1,7 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LinkEntryGuard</title><link rel="stylesheet" href="popup.css"></head>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LinkEntryGuard</title><link rel="stylesheet" href="popup.css"><link rel="stylesheet" href="lists.css"></head>
 <body>
-  <header><div class="appicon">✚</div><div><h1>LinkEntryGuard</h1><small>链接访问保护</small></div><strong id="guardState" class="state">检测中</strong></header>
-  <main>
+  <header><div class="appicon">✚</div><div><h1>LinkEntryGuard</h1><small>链接访问保护 · 1.0.2</small></div><strong id="guardState" class="state">检测中</strong></header>
+  <main><section id="listQuick" class="listQuick" aria-label="链接名单"><div class="listTop"><strong id="listState">名单检测中…</strong><button type="button" id="retryList" class="textButton" hidden>重试</button><button type="button" id="manageLists" class="textButton">管理名单</button></div><div id="listMatches" class="listMatches"></div><div id="listControls" hidden><label for="listScope">范围</label><select id="listScope"><option value="url">当前网址</option><option value="site">整个网站（同协议及域名）</option></select><input id="listNote" type="text" maxlength="80" placeholder="备注（选填）" aria-label="名单备注"><div class="listButtons"><button type="button" id="addWhite" class="whiteButton">加入白名单</button><button type="button" id="addBlack" class="blackButton">加入黑名单</button></div></div><div id="listFeedback" role="status" aria-live="polite"></div></section>
     <section class="panel">
       <div class="switchRow"><div><strong>悬浮备注</strong><small>可显示的页面持续显示</small></div><label class="switch"><input id="showFloat" type="checkbox" aria-label="显示悬浮备注"><span class="track"></span></label></div>
       <label class="fieldLabel" for="profileName">当前浏览器备注</label>
@@ -11,6 +11,6 @@
     </section>
     <div class="protection"><span>Teams 网页点击保护</span><b>默认启用</b></div>
     <div class="protection"><span>网页访问前确认</span><b>默认启用</b></div>
-    <details><summary>拦截记录 <span class="counts"><span id="teamsCount">0</span> / <span id="externalCount">0</span></span></summary><div class="history"><div class="historyTitle"><strong>最近记录</strong><button type="button" id="clearLogs">清除</button></div><div id="events" class="events">读取中…</div></div></details>
-  </main><script src="popup.js"></script>
+    <details><summary>拦截记录 <span class="counts"><span id="teamsCount">0</span> / <span id="externalCount">0</span></span></summary><div class="history"><div class="historyTitle"><strong>最近记录</strong><button type="button" id="copyDiagnostics">复制诊断</button><button type="button" id="clearLogs">清除</button></div><div id="events" class="events">读取中…</div></div><div id="diagState" role="status" aria-live="polite"></div></details>
+  </main><script src="ui-transport.js"></script><script src="popup.js"></script><script src="list-quick.js"></script>
 </body></html>

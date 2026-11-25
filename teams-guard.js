@@ -78,7 +78,7 @@
     event.stopPropagation();
     if (['click', 'auxclick', 'keydown'].includes(event.type)) {
       showNotice();
-      try { chrome.runtime.sendMessage({ type: 'teams-link-blocked', url }); }
+      try { chrome.runtime.sendMessage({ type: 'teams-link-blocked', url })?.catch?.(() => {}); }
       catch { /* Guard still blocks the DOM action if background is unavailable. */ }
     }
   }

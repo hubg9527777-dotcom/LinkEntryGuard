@@ -3,14 +3,15 @@
   "name": "LinkEntryGuard · 双重链接保护",
   "short_name": "LinkEntryGuard",
   "description": "防止链接误入当前 Chrome；访问前选择直接打开或无痕打开，支持浏览器备注。",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "minimum_chrome_version": "116",
   "permissions": [
     "tabs",
     "storage",
     "declarativeNetRequest",
     "webNavigation",
-    "alarms"
+    "alarms",
+    "contextMenus"
   ],
   "background": {
     "service_worker": "background.js"
@@ -98,5 +99,6 @@
         "path": "rules/failsafe.json"
       }
     ]
-  }
+  },
+  "version_name": "1.0.2"
 }

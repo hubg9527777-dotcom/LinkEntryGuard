@@ -1,118 +1,158 @@
-# LinkEntryGuard 1.0.1 — 功能复核与完整安全审核报告
+# LinkEntryGuard 1.0.2 发布前功能验收与安全审计
 
-**审核日期：** 2026-11-21（项目当次会话日期，打包环境日期可能不同）  
-**审核对象：** 上一轮已交付的 `LinkEntryGuard_1.0.0_DragBoundaryReset.zip`，本次复制并修订后的全部源码。**不是用户 Mac 本地仓库的实时镜像，也不是 GitHub 在线分支。**  
-**交付版本：** `manifest.json` = **1.0.1**；不自动执行 Git 提交或 GitHub 推送。  
-**审计方法：** 逐文件源代码审查、权限/攻击面审查、规则匹配审查、敏感信息检索、官方 Chrome 文档核对、Node.js 事件/故障模拟测试、Chromium 启动尝试。  
-**验收级别：** 静态审计 + 本地模拟测试通过；真实 Chrome + Teams/TIM + 无痕及 Chrome 内部页面联调**待确认**。
+- 审计日期：2026-11-25；产品版本：1.0.2；交付构建：`1.0.2-r20261125.2`。
+- 审计基线：实际解包的 `LinkEntryGuard_1.0.2_Experience.zip`（51 个文件，不含目录项）；未使用过去的审核结论代替源码。
+- 审核方式：源码及配置审查、依赖公告检索、敏感凭据模式扫描、浏览器 API 文档核对、原有测试与新增故障注入、实际本地 Git 打包、Chromium 启动尝试。
+- 结论：可以提交源码至 GitHub 进行候选发布；尚不能认定真实浏览器完整验收通过。涉及授权边界的剩余风险请在发布前阅读。未修改用户本地 Git 仓库或远程仓库。
+- 严重度为项目自身安全策略的定性评级，不是 CVSS，也不代表已分配 CVE。表内位置均指修复后源码行号或函数。
 
-## 1. 项目概况、依赖与范围
+## 1. 项目概况与依赖审核
 
-| 项目 | 结果 |
-|---|---|
-| 应用类型 | Chrome Manifest V3 浏览器扩展，无服务端、无数据库 |
-| 语言、框架 | 原生 JavaScript、HTML、CSS、JSON，本地 PNG 和 SVG；无第三方框架 |
-| 依赖清单 | **直接依赖 0**；无 `package.json` / lockfile / `requirements.txt` / `go.mod` / `Cargo.toml` / `pom.xml` / `Podfile` |
-| 间接依赖 | **0**（不存在包管理器锁文件） |
-| 实际运行平台 | Chrome `minimum_chrome_version: 116`（平台最低版本声明，不是第三方库） |
-| 功能范围 | DNR 请求前确认、Teams 网页点击拦截、普通/无痕打开、悬浮备注、Profile 本地设置、操作日志 |
-| 审核文件 | `manifest.json`, `background.js`, `confirm.*`, `popup.*`, `floating-label.js`, `page-click-guard.js`, `teams-guard.js`, `policy.js`, `rules/failsafe.json`, `.gitignore`, `icons/*`, `tests/*`, 说明与审核文档 |
-| CI/CD | 当前源码包无 `.github/workflows`，不代表远端仓库不存在额外工作流 |
+原生 JavaScript、HTML、CSS、JSON，Chrome Manifest V3，声明最低 Chrome 116。运行时第三方依赖 0；本项目无 package.json、npm/pnpm/yarn 锁文件、Python/Go/Rust/Java 等依赖清单，无 npm 构建或远程加载模块。Node 内置 `assert/fs/path/vm/crypto` 等仅用于测试，未打进安装包。
 
-**依赖漏洞审查：** 没有第三方软件包可逐个列出或在 GHSA / OSV / NVD 中按包名核对；`npm audit`、`pip-audit` 等对本项目**不适用**，不能声称“执行后零漏洞”。浏览器自身 Chrome 安全更新不由扩展的锁文件控制，建议持续使用受支持的 Chrome 版本。未发现可判定为停止维护或疑似拼写仿冒的依赖，因为不存在这类依赖。
-
-## 2. 本轮问题汇总
-
-严重程度根据当前可见的利用条件评估，并非 CVSS 精确打分。以下行号指**本次修复后的 1.0.1 源码**。
-
-| 编号 | 类别 | 严重级别 | 位置 | 风险/触发条件 | 状态 |
-|---|---|---|---|---|---|
-| LEG-101-01 | 代码/功能 | Medium | `manifest.json:57-77`; `confirm.html:16-17`; `floating-label.js:1-3` | 悬浮标签只注入普通网页，进入扩展自身确认页时消失；在多 Profile 使用时可能忘记当前浏览器身份 | **已修复**：确认页载入同一悬浮组件 |
-| LEG-101-02 | 代码/可用性 | Low | `background.js:15-16,53-63` | 新安装默认关闭悬浮，与“默认显示、有需要再关闭”目标不一致 | **已修复**：新 Profile 默认显示；原有 `show=false` 保留 |
-| LEG-101-03 | 代码/状态 | Low | `background.js:64-74,199-210,493-497` | 修改备注后自有确认页和浏览器限制页无法及时辨认 Profile | **已修复**：扩展页广播 + 工具栏图标悬停提示，异常不影响规则 |
-| LEG-101-04 | 代码/可用性 | Medium | `floating-label.js:145-176` | SPA 更换根元素/删除 DOM 直接子节点会令悬浮条消失 | **已修复（尽力恢复）**：轻量观察器重新挂载，限制 10 秒内最多 12 次防止恶意页面无限移除造成 CPU 负担 |
-| LEG-101-05 | 代码/状态 | Low | `floating-label.js:42-48,178-182` | UI 广播带有不合法坐标时旧前端可能回退默认位置，形成误跳动 | **已修复**：广播数据独立严格校验；真正鼠标拖动仍可越界贴边 |
-| LEG-101-06 | 代码/兼容 | Low | `floating-label.js:3`; `background.js:64-74` | 以前即使授权无痕访问也主动跳过悬浮标签 | **已修复**：已授权的无痕普通网页允许显示，同 Profile 同步备注；未授权无法注入 |
-| LEG-D01 | 代码/隐私 | Medium | `background.js:20,118-126`; `confirm.js:7-24` | 完整目标 URL 写入确认页 fragment；带有令牌、凭据、敏感查询参数的链接可能留在本机历史/截图中 | **待开发者决定**：隐私架构变更 |
-| LEG-D02 | 代码/授权 | Medium | `background.js:242-313,436-447,473-489` | 25 秒精确临时 allow 规则并非原子的单次网络请求授权；工作线程中断/撤销失败可能延迟撤销 | **待开发者决定**：更严格状态机或系统级方案 |
-| LEG-D03 | 代码/兼容 | Medium | `manifest.json:47-90`; `rules/failsafe.json:1-15` | HTTP(S) 主文档之外的 SPA 状态变更、特殊协议、Service Worker/缓存路径不能确保全部被请求前拦截 | **建议关注**；完全覆盖会改变浏览行为 |
-| LEG-D04 | 代码/兼容 | Medium | `background.js:286-313,436-447` | 已拦截的 POST 表单无法由普通 `tabs.update({url})` 重放表单请求体，可能干扰提交/登录 | **待开发者决定**：兼容性与拦截严格度取舍 |
-| LEG-W01 | 代码/权限 | Medium | `manifest.json:8-14,47-90` | 所有 HTTP(S) host 权限具有宽广影响范围，一旦扩展遭入侵可能读取/影响众多网页 | **建议关注**；现有全站保护需求下无法无代价缩小 |
-| LEG-W02 | UI/防伪 | Low | `floating-label.js:6-35,145-176` | 标签位于页面 DOM，可被恶意网站遮挡/仿造，恢复机制不能保证对抗持续破坏 | **建议关注**；不能当作系统级防伪 UI |
-| LEG-W03 | 日志/隐私 | Low | `background.js:102-116`; `popup.js:39-75` | 本机存储访问域名和时间，域名本身可能包含隐私信息 | **建议关注**；上限 100 条，可手动清除 |
-| LEG-W04 | 密钥/CI | Low | `.gitignore:1-12`；整个交付目录 | 当前文件未发现实际密钥；但缺少本机 `.git` 历史和远端 Actions，无法证明历史未泄露过密钥 | **待确认** |
-| LEG-W05 | 平台限制 | Medium | `manifest.json:47-77`; Chrome 扩展安全模型 | `chrome://`、原生新标签页、Chrome Web Store、PDF 查看器、其他扩展页及原生书签栏不能被普通内容脚本覆盖 | **待开发者决定**：不擅自替换新标签页或要求系统常驻程序 |
-| LEG-W06 | 无痕权限 | Medium | `background.js:358-436`; `floating-label.js:1-3` | 未授权“允许在无痕模式下运行”时可尝试创建无痕窗口，但后续无痕网页不会继续受该扩展监测/显示备注 | **建议关注**；权限必须由用户明确授予 |
-
-**未发现可确认的 Critical / High 级新漏洞。** 上表的 Medium/Low 项仍不能等同于“安全性已经全面验证”。
-
-## 3. 已实施的修改——内容、原因、兼容性
-
-1. **统一悬浮组件覆盖**：`confirm.html` 引入本地 `floating-label.js`；`confirm.js:19-27` 避免启用悬浮时重复展示同一备注胶囊。确认页由扩展自身加载本地脚本，不新增 `web_accessible_resources`，不扩大内容脚本匹配范围。
-2. **新 Profile 默认开启**：`background.js:16,53-63` 从首次安装默认隐藏调整为默认显示。已保存的 Profile `show=false` 仍尊重用户选择；关闭只影响悬浮条，不关闭链接保护。
-3. **自有扩展页实时同步**：`background.js:64-74` 向内容脚本和本扩展页面发更新通知；只向当前 Profile 的已连接扩展上下文广播，没有新增跨扩展对外通信权限。
-4. **Chrome 原生 UI 最小退路**：`background.js:199-210,493-497` 将备注写进原生扩展图标的 tooltip，供无法注入悬浮条的页面鼠标悬停查看。`setTitle()` 失败会安全忽略，不影响设置保存或 DNR 保护规则。
-5. **无痕页面覆盖**：`floating-label.js:1-3` 不再无条件排除无痕。只有用户在 Chrome 设置中允许该扩展无痕运行，内容脚本才能显示；不自动提升权限。
-6. **DOM 自恢复**：`floating-label.js:145-176` 监测根元素/直接子节点变化重新挂载，不遍历 GPT 等大型 SPA 每次内部 DOM 变化；增加 10 秒最多 12 次的防滥用限制。
-7. **边界与状态校验分离**：`floating-label.js:42-58,178-182` 保存/同步坐标要求非负整数且不超过 8192；拖动时临时负数仍会被贴边计算，不会再次出现越界回默认。
-8. **界面说明与版本更新**：`popup.html:6` 删除“仅普通网页显示”的过时描述；`manifest.json:6` 与测试断言统一 `1.0.1`；README 增加无法覆盖区域的准确说明。
-
-**刻意没有改变：** Teams 直接点击阻止策略、DNR 主规则、25 秒放行、直接/无痕/取消三个按钮、拖动手势及点击空白处保存、Profile 分离、权限清单。没有调用远程 GitHub，也没有新增第三方包。
-
-## 4. 需要开发者决定的取舍（未擅自修改）
-
-| 问题 | 选项 | 建议 |
+| 类型 | 依赖及实际版本 | 处理 |
 |---|---|---|
-| 真正所有界面显示 | A. 现有普通网页/确认页悬浮 + 原生工具栏 tooltip；B. 使用 `chrome_url_overrides.newtab` 替换浏览器新标签页；C. 安装系统级覆盖层 | **推荐 A**；B 改变 Chrome 新标签功能仍不能覆盖设置/工具栏，C 增加软件复杂度 |
-| 敏感 URL 在 fragment | A. 保留当前 DNR 重定向；B. 重新设计目标令牌传递架构 | **先维持 A**，如需处理含敏感 token 的链接再单独评审 B |
-| 临时放行严格度 | A. 现有精准 URL + tab ID + 25 秒 + 清理重试；B. 复杂状态机或系统级链接入口拦截 | **先维持 A**，不要宣传严格原子的一次请求授权 |
-| POST / 全协议导航 | A. HTTP(S) GET 风格主导航优先；B. 处理全部表单/程序化跳转并允许兼容性变化 | **先维持 A**，遇真实问题再按案例设计 |
-| `file://` 本地页面 | A. 不请求读取本地文件权限；B. 在 `manifest.json` 添加 file 匹配，要求用户另行开启“允许访问文件网址” | **推荐 A**，不为显示标签而额外取得敏感本地文件访问权限 |
+| CI Action（唯一直接外部 Action） | 原 `actions/checkout` v4.2.2，`11bd71901bbe5b1630ceea73d27597364c9af683` | 同大版本更新至 v4.4.0，`11d5960a326750d5838078e36cf38b85af677262`，两处使用相同完整 SHA |
+| CI 工具 | GitHub 托管 ubuntu-24.04 runner 提供 Node、Git、gh、unzip、sha256sum | 实际远程镜像及工具版本待 Actions 运行确认；本地 gh 不存在，不执行发布 |
+| 测试环境 | Node v22.16.0、Chromium 144.0.7559.96；Python/YAML 等用于审计而非插件依赖 | 仅说明本次工具环境，不视为最终用户推荐安全版本；使用持续支持且更新至安全补丁的运行环境 |
+| 间接依赖 | 项目无锁文件、无 vendor 库 | checkout 自身分发包及其内部依赖不在源码包，待独立 SBOM/上游审计；不编造实际版本 |
 
-## 5. 逐类安全审查
+2026-11-25 检索 GitHub Advisory Database、OSV、NVD、checkout 官方 release/changelog/security：未检出能明确证明本工作流使用的 checkout 版本存在适用 Critical/High 漏洞的条目；部分 GitHub 精确查询页面抓取受限，不能据此宣称无漏洞。已查明 v4.4.0 具有针对不安全 fork PR checkout 的加固回移；本项目只在版本标签 push 时运行，不使用 `pull_request_target` 或 `workflow_run`，原来即关闭凭据持久化，因此相关场景不直接适用。v4.4.0 仍有官方发布记录，非停止维护的明确证据；不擅自跨大版本升级。未发现仿冒包。npm audit 等包管理器扫描不适用（无清单/锁）；不为生成扫描结果而临时引入 npm 依赖。GitHub Actions 原始上游包完整依赖清单、私有仓库 Dependabot 告警与实际 runner 软件版本待确认。
 
-**注入/XSS：** 用户备注和 URL 渲染使用 `textContent`；未发现动态执行代码、`innerHTML` 拼接不可信输入、远程加载 JS。SVG 为本地静态路径绘制。确认页背景核查 `sender.id`、frame、tab、URL 严格对应，不允许普通网页任意授权 URL。既有临时 URL 规则使用转义和大小写敏感匹配。
+核对来源（均为公开资料，检索日期同上）：
 
-**权限与消息**：`manifest.json` 包含 `tabs`、`storage`、`declarativeNetRequest`、`webNavigation`、`alarms`；HTTP(S) 全域为全站行为所需。未配置 `externally_connectable`、`scripting`、远程代码或额外原生消息主机。只允许有效来源查看/修改相应 UI，只有扩展确认页可请求放行；日志接口限定为插件弹窗。
+- https://github.com/actions/checkout/releases （v4.4.0 官方发布及变化）
+- https://github.com/actions/checkout/commit/11d5960a326750d5838078e36cf38b85af677262 （官方提交）
+- https://github.com/actions/checkout/security
+- https://github.com/advisories/ 、https://osv.dev/ 、https://nvd.nist.gov/
+- https://docs.github.com/en/actions/reference/security/secure-use （最小权限、固定 SHA、可信触发）
+- https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest/ （规则优先级、RE2、会话规则、缓存/SW 边界）
+- https://developer.chrome.com/docs/extensions/reference/api/windows （无痕窗口创建）
+- https://developer.chrome.com/docs/extensions/reference/api/storage/StorageArea （可信上下文）
+- https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle/ （后台休眠及恢复）
 
-**存储和日志：** `chrome.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'})` 失败时关闭持久日志写入，避免敏感历史通过内容脚本读取；事件仅保存主机名及时间/原因。备注每 Profile 本地保存，非加密机密存储，不要填写密码或敏感凭据。保存合并有串行队列。
+## 2. 功能验收矩阵（先验收，再修复）
 
-**密钥扫描：** 全文本搜索 hardcoded API Key/Token/密码/私钥/连接串/Webhook、证书等，未发现实际秘密；`.gitignore` 忽略 `.env`、key/pem/pfx/p12 等常见敏感文件。未发现需要迁移到环境变量的实际密钥，故**不生成无意义的 `.env.example`**。如果秘密曾在 Git 历史或公开版本泄露，必须到原服务吊销并重新生成，光删当前代码不够。
+原有 15 个测试脚本在未改基线已全部成功。最终 16 个测试脚本通过；下表“模拟通过”指真实源文件在 Node 中执行浏览器 API/DOM 事件模型，不代表 Chrome 本身已验证。实际测试 Chromium 受既有管理策略约束（ExtensionInstallBlocklist=*、IncognitoModeAvailability=1、URLBlocklist=*）；没有修改或绕过这些策略。
 
-**不适用类别：** 无数据库/SQL/NoSQL、系统命令执行、文件上传解压、加密实现、服务端 CSRF/CORS、Electron IPC、移动端 WebView、自定义反序列化、TLS 校验关闭。URL 跨域导航属于插件的显式用户确认动作，不是将任意 URL 传给服务器抓取的 SSRF。
+| 功能 | 源码/测试证据 | 结果及边界 |
+|---|---|---|
+| 外部软件、地址栏主文档导航 | background.js、rules/failsafe.json、confirm-integration | DNR 规则生成/优先级模拟通过；实际外部 Teams/TIM 请求待确认 |
+| Teams 网页点击保护 | teams-guard.js、teams-events | 左键、组合键、中键、键盘、拖动链接与 data-href 测试通过；真实 Teams DOM 待确认 |
+| GPT 等正常站内切换 | page-click-guard.js、page-click-events | 同源 SPA 链接不强制确认；实际网络主文档导航仍确认；真实 GPT 待确认 |
+| 普通打开/取消/无痕打开 | confirm.js、confirm-integration、confirm-page | 两种无痕权限场景、拒绝策略、过期确认、撤销失败模拟通过；实际窗口创建待确认 |
+| 黑名单/白名单/未分类 | policy.js、background.js、list-quick-events、confirm-integration | 黑优先、白自动单次授权、未分类人工确认；规则读取失败不放行 |
+| 精确、目录、整站规则 | policy.js、list-tools | 大小写、协议、域名、端口、目录尾斜杠、特殊字符与相似域名覆盖；不提供子域通配 |
+| 确认页/弹窗快捷加入、转换、移除、备注 | list-quick.js、ui-composed、list-quick-events | 快照冲突、焦点事件、按钮状态、读取失败后重试模拟通过 |
+| 集中管理、搜索、多选、批量转黑/白、移除 | lists.js、lists-manager-events | 测试通过；实际交互与大量名单性能待确认 |
+| 导入、导出、预览、撤销 | list-tools.js、lists.js、lists-manager-events | JSON 格式/体积/数量/重复校验，冲突保留原名单；备份只恢复上一快照，真实文件选择/下载待确认 |
+| 右键管理与规则测试 | background.js、lists.js、confirm-integration | 临时令牌一次消费、不访问目标、无效协议拒绝模拟通过；Chrome 右键 UI 待确认 |
+| 悬浮备注与开关 | floating-label.js、always-visible、floating-label-events、popup-events | 30px 标签、编辑、失焦、拖动贴边、取消捕获、重置、DOM 重建恢复模拟通过；实际位置待确认 |
+| 各 Profile 数据独立 | storage.local、无 sync 使用、后台设置串行 | 源码支持独立存储，同 Profile 多窗口共享；两真实 Profile 隔离需实机验证 |
+| 日志及脱敏诊断 | background.js、popup.js、privacy-failure | 日志只记主机名与固定原因，诊断不含完整 URL/备注；异常状态与恢复测试通过 |
+| 旧版升级、构建不一致 | ui-transport.js、ui-composed、confirm-integration | 保持原存储键，失败时不清空名单，模拟覆盖旧构建；实际同路径升级待确认 |
+| GitHub 自动发布 | .github/workflows/release.yml、release-safety | 版本检查、测试、文件白名单、实际 Git archive 本地执行通过；远程发布待确认 |
 
-**CI/CD：** 当前源码包没有 `.github/workflows`、`pull_request_target`、第三方 Actions 或脚本注入点；由于缺 Git 远端上下文，远端工作流风险**待确认**。
+### 必须纠正的产品表述
 
-## 6. 测试和结果
+- 黑名单只控制受扩展影响的主页面访问，不是防火墙；不撤销已加载网页、网页子资源或其他程序网络连接。
+- 白名单仍走单次受控授权，可能看到短暂确认页。Teams 网页的直接点击保护继续优先，不会因白名单自动允许该 DOM 点击。
+- 无痕未授权扩展时，仅打开动作受当前名单检查；无痕窗口内后续访问不受保护。
+- 悬浮备注不能覆盖 Chrome 原生 UI、内部页和部分特权页面；图标悬停提示为替代，不是真正全屏悬浮。
 
-| 项目 | 结果 |
+## 3. 问题汇总及逐项修复
+
+| 编号 | 类别 | 严重级别 | 位置（修复后） | 状态 |
+|---|---|---|---|---|
+| A01 | 代码 | High | background.js:388–468（emergencyRule/setEmergencyBlock/clearGrant/cleanupExpired） | 已修复：增加紧急阻断；平台 API 双重失败风险见 R02 |
+| A02 | 代码 | Medium | background.js:308–326、434–468 | 已修复：校验残留及被改动的动态/会话规则 |
+| A03 | 代码 | Medium | background.js:184–245、471–522、605–696 | 已修复：过期确认及异步导航竞争 |
+| A04 | 代码 | Low | confirm.js:6–8、30–37、65–67；list-quick.js:78、101 | 已修复：嵌入页操作与 hash 更新 |
+| A05 | 代码 | Medium | background.js:41–55、69–77、710–714 | 已修复：隔离失败时不读取/写入设置，不返回历史 |
+| A06 | 代码 | Low | teams-guard.js:81 | 已修复：异步消息拒绝处理 |
+| A07 | 代码 | Low | popup.js:33–42 | 已修复：迟到保存响应覆盖新草稿 |
+| A08 | 代码/CI | Medium | .github/workflows/release.yml:8–46 | 已修复：测试只读，发布单独写权限 |
+| A09 | 依赖 | Low | .github/workflows/release.yml:21、49 | 已修复：checkout v4.2.2 → v4.4.0，完整 SHA |
+| A10 | 代码/CI | Medium | .github/workflows/release.yml:51–66 | 已修复：从已提交文件按明确允许清单打包 |
+| A11 | 密钥/隐私 | Low | .gitignore:15–22 | 已修复：排除常见本地凭据、导出名单及生成目录 |
+
+### A01：撤销失败时仅显示 ERR，残留 allow 仍可能生效
+
+原实现即使保留待撤销状态，Chrome 的请求管线仍会使用未删除的会话规则。触发条件：授权后会话规则删除失败、用户或程序在有效标签内重复访问同一匹配 URL；可能无需再次确认。该项目控制的是误开链接，定为 High（产品保护失效，不是系统代码执行）。修复：尝试安装高于正常 allow（100）和黑名单 redirect（200）的独立动态 block（1000）；只有成功核验会话规则清理后才能撤销紧急阻断。后台重启不会因为一般规则清理而先删掉该保护。新增测试注入撤销失败、验证阻断优先级、恢复后撤销紧急规则。若 Chrome 同时拒绝紧急规则安装，仍无法保证阻止请求，ERR 和日志明确提示；见 R02。
+
+### A02：规则健康检查未涵盖未知 ID 与临时规则内容
+
+原来只清理高编号孤立授权，其他未知规则及活跃授权内容错误可能未被识别。需要已有规则异常、旧版本迁移或扩展自身状态损坏；不表示普通网页可以直接修改 DNR。修复：动态规则只接受全局、紧急及本名单保留区间；会话规则只接受已追踪且结构吻合的授权，未知 ID、被篡改或缺失的规则清理后重新检查。新增低编号未知规则和改变授权优先级测试。
+
+### A03：异步批准或名单编辑可能作用于已改变的确认标签
+
+触发条件：用户批准、编辑名单后，在规则查询或安装期间改变标签地址/待导航地址；旧操作可能覆盖新页面，或向过期目标放行。修复：在队列内、安装规则前后及实际导航前检查 `tab.url` / `pendingUrl`，失败撤销刚创建的授权；确认页名单修改在同步规则、存储前复核来源；无痕转交后仅清理仍是原确认页的标签。测试注入安装授权期间切换 pendingUrl，拒绝旧请求且不遗留规则。跨浏览器 API 无事务，仍存在极短的最终检查与操作间隙（R02）。
+
+### A04：可嵌入确认页取消操作及 fragment 更新
+
+确认页为 DNR 所需 web accessible resource，外部站点可尝试嵌入。后台原本拒绝 iframe 放行，但取消及快捷入口未统一限制；同一确认文档的 fragment 更新也可能使显示内容与目标不一致。修复：嵌入页禁止访问/取消及快捷名单管理；顶层 hash 改变时锁定按钮并重新加载；打开前核对目标。新增嵌入和 hash 更新测试。
+
+### A05：隐私隔离失败时设置/日志读取路径不统一
+
+Chrome 默认 local storage 对 content script 可见；若 setAccessLevel 失败，原 readUi/saveUi 仍可继续访问浏览器备注，弹窗状态还可能读取旧日志。普通网页不是天然可调用扩展 API，风险需要扩展内容脚本被滥用或隔离失败。修复：读取/保存设置要求隔离成功，失败时拒绝返回日志；原有日志清理、名单读写 fail-closed 行为保留。不得擅自删除已有名单或备注。见 R03 关于存储并非加密保管库的边界。
+
+### A06：Teams 内容脚本发送消息 Promise 拒绝未被接住
+
+触发条件：扩展重新加载、后台不响应。原同步 try/catch 无法捕获异步拒绝。补充 Promise catch，仍在网页侧阻止点击，不让日志失败改变拦截。
+
+### A07：备注保存响应覆盖后续输入
+
+用户在保存旧备注尚未返回时输入新备注，返回值可能覆盖新草稿。只在当前内容仍为当时提交值时回填成功值或恢复旧值。新增延迟响应测试。
+
+### A08–A10：CI 权限、依赖与发布内容
+
+旧工作流全部步骤（包括源码测试）有 contents:write；若未来测试/依赖遭篡改可扩大影响。将验证 job 单独设为只读，发布 job 依赖验证成功；两次 checkout 固定同一事件 SHA、关闭持久化凭据；标签格式/manifest 版本必须一致，重复执行不会强制覆盖已有 Release。更新 checkout 同主版本安全加固版本（见第 1 节）。发布从 Git 已跟踪的明确文件清单生成 ZIP，不再用宽泛通配符打包目录，避免误夹带新文件或本地导出。CI 不使用不可信 PR 触发，不把 GitHub 表达式直接插入 shell 命令，变量均引号保护。验证 job 运行所有测试和 JS 语法检查，发布 job 不执行项目 JS；发布 token 仍有创建 Release 所需写权限。新增 release-safety 静态回归测试，检查所有 manifest/HTML 引用资源存在且为普通文件。
+
+### A11：本地名单导出和常见凭据缺少 Git 忽略
+
+`LinkEntryGuard-lists.json` 含完整网址、备注，可能存在敏感参数；若用户把导出放入项目目录后 git add -A 可能误提交。新增导出文件、dist、.npmrc、.netrc、.git-credentials、keystore 忽略项；保留原 .env、证书密钥忽略规则。忽略规则不能清除已被 Git 跟踪的文件。
+
+## 4. 逐文件/攻击面审查
+
+| 文件/范围 | 检查结果 |
 |---|---|
-| 10 组 Node 自动化模拟（原有 9 + 新增 `always-visible.js`） | **10/10 通过** |
-| `node --check` 所有 JavaScript | 通过 |
-| `manifest.json`、`rules/failsafe.json` 解析 | 通过 |
-| 默认显示、已有偏好保留、备注/开关并发保存 | 通过（模拟） |
-| 扩展确认页同组件、已授权无痕上下文、重挂载和非法位置广播 | 通过（模拟） |
-| 点击确认/无痕/取消、异常放行规则、Teams 点击、SPA 兼容 | 通过（模拟） |
-| 本地密钥/危险 API/远程代码检索 | 未发现真实密钥或不安全动态加载 |
-| Chromium headless 加载真实扩展和本地 HTTP 测试 | **未完成**：启动后超时，没有取得 DOM 或后台可验证状态；不能算通过 |
-| Mac/Windows Chrome 全流程实机测试 | **待确认** |
+| manifest.json | MV3，无 externally_connectable、无任意脚本注入权限、无远程代码配置；HTTP/HTTPS 主机权限与 tabs/storage/DNR/webNavigation/alarms/contextMenus 均有对应功能。全站权限仍是产品必要的广泛权限；Chrome 内部页没有新增权限。 |
+| background.js | 来源 ID、顶层 frame、扩展 URL、目标绑定、名单权限、快照、存储隔离、规则完整性和临时授权等见 A01–A05、R02。无外部 HTTP 客户端、无 eval、无 shell、无数据库；不记录原始 API 错误或 URL 查询参数。 |
+| policy.js:31–55 | 仅 HTTP/HTTPS、拒绝 URL 内凭据、限制长度，规则匹配使用 URL 解析与转义后 RE2；无用户正则直接执行。目录须明确斜杠、同源匹配，黑名单优先。 |
+| rules/failsafe.json | 静态 main_frame block 优先级 1，动态确认 10、临时授权 100、黑名单 200、故障紧急阻断 1000；同扩展规则优先级关系正确。实际 Chrome 生效待确认。 |
+| confirm.html/css/js、list-quick.js | 本地脚本与样式，无外部资源；文本通过 textContent，来源/顶层/目标约束；确认 URL fragment 隐私仍见 R03。 |
+| popup.html/css/js、ui-transport.js | 本地 UI、构建一致性、错误码、读取重试、写入不自动重放；异步草稿处理见 A07；无远程执行。 |
+| lists.html/css/js、list-tools.js | JSON 解析无代码执行，2 MB/300 条/URL 长度校验，导入预览、旧快照、规则冲突处理；文本安全渲染；导出为本地 JSON Blob，未接收 ZIP 文件。 |
+| floating-label.js | Closed shadow root，真实双击/键盘/指针事件，坐标验证、重建频率限制；网站仍可遮挡宿主节点，不能作为可信安全标志（R05）。 |
+| page-click-guard.js、teams-guard.js | 内容脚本限定域/协议与事件，普通网页同源切换保留；网页事件无法覆盖所有程序化导航，DNR 是主要保护，未将 DOM 点击监听冒充网络隔离。 |
+| icons/*.png、icons/incognito.svg、所有 CSS | 本地资源；SVG 无远程脚本，CSS 无远程 import；未发现可执行外链。 |
+| tests/*.js（16） | Node 内置模块，模拟数据及故障注入，不包含真实账号；测试不进入发布 ZIP。 |
+| .github/workflows/release.yml、.gitignore | A08–A11；无 PR 高权限触发、无未固定版本 Action、无硬编码 Token。 |
+| README、CHANGELOG、历史报告及记录 | 检查敏感信息与版本表述；历史报告保留为档案，当前结论以本文件为准。 |
 
-### 用户设备上建议重点核查
+其他要求：SQL/NoSQL 注入、服务端 SSRF/CORS/CSRF、数据库鉴权、系统命令注入、桌面 IPC、Electron nodeIntegration、移动 WebView、上传解压 Zip Slip、TLS 校验关闭、自造加密、硬编码 IV/盐：本扩展无对应服务端/数据库/桌面/移动组件或代码路径。URL 导航和扩展消息授权是相关的实际攻击面，不能以“不适用”替代上述审查。第三方网站和 Chrome 本身的漏洞不在本项目源码修复范围内。
 
-1. **更新旧 Profile**：升级后如果原先关闭过悬浮，弹窗开关仍保持关闭；开启后在 Google/GPT 等网页及插件确认页应看到同一备注；关闭时都应隐藏小条。
-2. **确认页**：点击 Teams/TIM 链接，在确认页面能看到可移动的备注。不要把 Chrome `chrome://` 设置页当作同等级测试对象。
-3. **拖动**：靠近书签栏不会跳回默认，双击修改、点击空白处保存、重启浏览器位置仍保持；“重置位置”只在点击时生效。
-4. **无痕**：如果允许扩展无痕运行，无痕网页也有备注；未允许时仍可按既有流程请求创建无痕窗口，但无痕内不继续注入。
-5. **其他 Profile**：同一份源码在两个独立 Chrome Profile 中分别保存不同备注，互不覆盖。
-6. **拦截安全**：正常直接打开、无痕打开、取消；同一 URL 第二次必须重新确认，不能永久放行；GPT 同源聊天切换不被网页点击脚本过度拦截。
+## 5. 密钥与凭据审查
 
-## 7. 官方资料（不使用中国大陆来源）
+对源码、配置、测试、文档、历史报告及图像/安装文件进行常见密钥格式模式扫描（GitHub token、云 access key、API key、SSH/PEM 私钥、Slack/Discord webhook、数据库 URI 等）及关键词人工核查。未发现实际硬编码凭据；测试用 `?token=TEST`/`?token=SECRET` 为测试数据，`GH_TOKEN: ${{ github.token }}` 是运行时 GitHub 临时凭据引用而非明文密钥。无 .env 实体文件，不需要虚构 .env.example；已核对 .gitignore。源码包没有 .git 历史、远程秘密配置或用户浏览器数据，因此是否曾提交或泄露密钥、是否存在已跟踪忽略文件，待开发者在真实仓库检查。若发现已提交或泄露的凭据，必须在原平台撤销并重新生成，仅删除代码不够；需审查旧 Release 资产和历史提交。不要把名单导出、完整登录链接或浏览器 Profile 上传 GitHub。
 
-- Chrome 扩展安全边界：[Chromium Extensions Security FAQ](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/extensions/docs/security_faq.md)
-- Chrome 内容脚本和可注入网页：[Run scripts on every tab](https://developer.chrome.com/docs/extensions/get-started/tutorial/scripts-on-every-tab)
-- 浏览器工具栏 tooltip：[chrome.action](https://developer.chrome.com/docs/extensions/reference/api/action)
-- DNR 规则及撤销：[declarativeNetRequest](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest)
-- 权限与文件/无痕访问：[Declare permissions](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions)
-- 备注数据隐私：[Protect user privacy](https://developer.chrome.com/docs/extensions/develop/security-privacy/user-privacy)
+## 6. 剩余风险及待开发者决定
 
-**最终结论：** 1.0.1 已按浏览器权限允许的范围扩大悬浮标签覆盖，补充状态同步和恢复保护；10 组本地模拟测试通过，未发现新的已确认 Critical/High 漏洞。平台禁止注入的 Chrome 内部页面无法承诺真正“任何时候都浮在页面上”，中等级隐私/授权/表单兼容风险仍需开发者取舍和真实 Chrome 验收。
+| 编号 | 类别/严重级别 | 位置 | 风险与选择 | 状态 |
+|---|---|---|---|---|
+| R01 | 代码 / Medium | page-click-guard.js:8–25；background.js:747–757；manifest.json | DNR 仅覆盖到达网络栈的主文档请求；SW CacheStorage、非网络 SPA、下载、非 HTTP(S)、已加载页面存在边界。A 保留现行为并准确宣传；B 扩大到更严的网页/系统级控制（会影响正常浏览）。建议 A。 | 待开发者决定/实机确认 |
+| R02 | 代码 / Medium | background.js:388–522 | 单次授权是标签+精确网址+限时，不是原子的一次网络请求；25 秒 TTL，后台休眠/重复请求、API 双重失败、极短 TOCTOU 均不能保证完全消除。A 保持现有受控授权及紧急阻断；B 改架构/采用系统级入口，成本高。建议 A，不宣称绝对隔离。 | 待开发者决定 |
+| R03 | 隐私 / Medium | background.js:30、258–268、147–149；lists.js 导出、storage.local | 确认 URL fragment、完整名单/上一份备份/导出文件可能包含登录 token；本地存储不是加密保险箱。右键预填已采用一次性令牌，DNR 直接重定向的原始目标仍无法无条件令牌化。A 保留并提示；B 重构确认 URL 传递与备份保留策略。建议先不在名单保存敏感 URL。 | 待开发者决定 |
+| R04 | 代码 / Medium | background.js:605–657；confirm.js | 无痕未授权运行时，其后续导航不受控制；POST 表单重放及跨站 OAuth 重定向可能中断/再次确认。A 保留逐次确认；B 对特定经过验证的重定向链放行、要求无痕授权（改业务行为）。建议 A，先做真实登录测试。 | 待开发者决定 |
+| R05 | 代码 / Low | floating-label.js、manifest.json | 网页可遮挡/移除标签，原生 Chrome 页面不能注入；主机权限可见所有 HTTP/S 页面。A 保留可见提示，最小化内容脚本；B 缩小权限或用系统级方案（影响全站保护）。建议 A。 | 建议关注 |
+| R06 | CI / Medium | .github/workflows/release.yml | tag 权限、分支保护、GitHub Actions 真实 runner、仓库历史和 token 权限未实测；恶意可信提交或可移动标签仍有供应链风险。建议限制 v* 标签创建/更新权限，开启 secret scanning、Dependabot，审阅已有标签而不 force push。 | 待确认 |
+
+本轮不增加自动无痕名单、自动放宽登录跳转、子域通配或全局保护关闭按钮，不删除原功能，不迁移名单数据格式，不擅自大版本升级或轮换凭据。源代码中未发现已确认 Critical 漏洞；A01 高级别保护风险已加固，剩余不可原子控制的 Chrome 限制不应被描述为全部解决。
+
+## 7. 测试、交付及发布门槛
+
+- 原有 15 组基线测试、修复后的 16 组测试（含 `release-safety.js`）全部通过；新增断言覆盖撤销失败紧急阻断、未知/修改规则、过期确认、嵌入页及 hash 更新、旧备注响应和发布文件清单。
+- JS/JSON/YAML/Bash 语法、ZIP 完整性、Git 文件清单和构建版本核对见 `TEST_RESULTS_1.0.2.txt`。
+- 真实 Chromium 144 启动后访问本地测试页返回 `ERR_BLOCKED_BY_ADMINISTRATOR`，未观察到扩展 worker；管理策略也禁用无痕。真实 Chrome、Teams/TIM、多个 Profile、OAuth/POST/重定向、DNR 真正匹配及紧急规则恢复、GitHub Actions 远程执行均为待确认。未绕过策略、未使用模拟结果冒充实机结果。
+- 交付完整源码包（含 .github、测试和本报告），另提供按 CI 清单构建的本地安装 ZIP 用于试装。上传 GitHub 应使用完整源码包，不要只提交安装包。
+- 发布前建议至少验收：外部点击普通/无痕/取消、黑名单覆盖白名单、登录及 GPT 切换、导入导出及撤销、跨 Profile、更新保留数据、紧急恢复状态。先在测试 Profile 重新加载，不卸载原扩展。版本标签尚不存在时，提交 main 后创建 v1.0.2 并推送；如果标签已存在，不强制重写，须先明确如何处理既有 Release。

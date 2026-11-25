@@ -12,13 +12,14 @@ class Element {
 }
 const ids=Object.fromEntries(['guardState','teamsCount','externalCount','events','clearLogs','showFloat','profileName','saveState','resetPosition'].map(id=>[id,new Element()]));
 const document={getElementById:id=>ids[id],createElement:()=>new Element()};
-let offline=false,failSave=false;
+let offline=false,failSave=false,releaseSave=null,slowSave=false;
 const saved={name:'工作专用',show:false,position:{top:35,right:230}};
 const chrome={runtime:{sendMessage:async msg=>{
   if(offline)throw new Error('offline');
   if(msg.type==='get-ui')return {ok:true,ui:{...saved}};
   if(msg.type==='save-ui'){
     if(failSave)return {ok:false};
+    if(slowSave)await new Promise(r=>{releaseSave=r;});
     Object.assign(saved,msg.changes);
     if(!saved.name.trim())saved.name='未命名浏览器';
     return {ok:true,ui:{...saved}};
@@ -26,7 +27,8 @@ const chrome={runtime:{sendMessage:async msg=>{
   if(msg.type==='get-status')return {ok:true,ready:true,events:[{type:'teams',host:'example.test',at:Date.now()}]};
   if(msg.type==='clear-events')return {ok:true};
 }}};
-const context=vm.createContext({document,chrome,console,Date,Promise});
+const LegUI={request:async m=>{const r=await chrome.runtime.sendMessage(m);if(!r?.ok)throw new Error(r?.reason||'失败');return r;}};
+const context=vm.createContext({document,chrome,console,Date,Promise,LegUI});
 vm.runInContext(fs.readFileSync(path.join(__dirname,'..','popup.js'),'utf8'),context);
 (async()=>{
   await new Promise(r=>setImmediate(r));
@@ -39,6 +41,10 @@ vm.runInContext(fs.readFileSync(path.join(__dirname,'..','popup.js'),'utf8'),con
   ids.profileName.value='账号 2';
   await ids.profileName.handlers.blur();
   assert.equal(saved.name,'账号 2');
+  slowSave=true;ids.profileName.value='旧草稿';const pending=ids.profileName.handlers.blur();
+  await new Promise(r=>setImmediate(r));ids.profileName.value='新草稿';releaseSave();await pending;slowSave=false;
+  assert.equal(ids.profileName.value,'新草稿','delayed save must not overwrite newly typed text');
+  await ids.profileName.handlers.blur();assert.equal(saved.name,'新草稿');
   await ids.resetPosition.handlers.click();
   assert.equal(JSON.stringify(saved.position),JSON.stringify({top:0,right:110}),'reset button restores exact initial position');
   assert.equal(ids.saveState.textContent,'位置已重置');

@@ -9,18 +9,21 @@ const installed = new Map(), session = new Map(), local = new Map(), tabs=new Ma
 const actions=[], permissions=[], titles=[], uiBroadcasts=[];
 const enabledRulesets = new Set(['failsafe']), disabledStaticIds = new Set();
 let failSessionRuleRemoval = false;
+let afterGrantInstall = null;
 let slowUiWrites = false;
 let incognitoAllowed = true;
 let incognitoPolicyDisabled = false;
 let createReturnsTabs = true;
 let failIncognitoTabQuery = false;
-const storage = {local: {
+const privateSession=new Map();
+const storage = {session:{get:async k=>({[k]:privateSession.get(k)}),set:async obj=>{for(const [k,v] of Object.entries(obj))privateSession.set(k,v);}},local: {
   setAccessLevel:async obj=>{permissions.push(obj.accessLevel);},
-  get:async k=>({[k]:local.get(k)}),
-  set:async obj=>{if(slowUiWrites && Object.hasOwn(obj,'leg_ui'))await new Promise(done=>setTimeout(done,5));for(const [k,v] of Object.entries(obj))local.set(k,v);},
+  get:async k=>{if(k==='leg_lists_v1'&&failListRead)throw new Error('injected read failure');return {[k]:local.get(k)};},
+  set:async obj=>{if(failListWrite && Object.hasOwn(obj,'leg_lists_v1'))throw new Error('injected list write failure');if(slowUiWrites && Object.hasOwn(obj,'leg_ui'))await new Promise(done=>setTimeout(done,5));for(const [k,v] of Object.entries(obj))local.set(k,v);},
   remove:async k=>{local.delete(k);}
 }};
-const rtMessage=event(), committed=event(), removed=event();
+const rtMessage=event(), committed=event(), removed=event(), historyChanged=event(),navigationError=event(),menuClick=event(),alarmEvent=event();
+let failListWrite=false, failListRead=false;
 const chrome = {
   storage, extension:{isAllowedIncognitoAccess:async()=>incognitoAllowed},
   windows:{create:async options=>{if(incognitoPolicyDisabled)throw new Error('Incognito mode is disabled');const id=900;const tab={id:909,windowId:900,url:options.url,incognito:true};tabs.set(909,tab);actions.push({type:'create-incognito',options});return !incognitoAllowed ? undefined : (createReturnsTabs ? {id,incognito:true,tabs:[tab]} : {id,incognito:true});},remove:async id=>{actions.push({type:'remove-window',id});}},
@@ -35,7 +38,7 @@ const chrome = {
     async getDynamicRules(){return Array.from(installed.values());},
     async updateDynamicRules({removeRuleIds=[],addRules=[]}) {for(const id of removeRuleIds)installed.delete(id);for(const r of addRules)installed.set(r.id,r);},
     async getSessionRules(){return Array.from(session.values());},
-    async updateSessionRules({removeRuleIds=[],addRules=[]}) {if(failSessionRuleRemoval && removeRuleIds.length)throw new Error('injected deletion failure');for(const id of removeRuleIds)session.delete(id);for(const r of addRules)session.set(r.id,r);},
+    async updateSessionRules({removeRuleIds=[],addRules=[]}) {if(failSessionRuleRemoval && removeRuleIds.length)throw new Error('injected deletion failure');for(const id of removeRuleIds)session.delete(id);for(const r of addRules)session.set(r.id,r);if(addRules.length&&afterGrantInstall){const fn=afterGrantInstall;afterGrantInstall=null;fn();}},
     async isRegexSupported({regex}) {try{new RegExp(regex);return {isSupported:true};}catch{return {isSupported:false};}}
   },
   tabs:{onRemoved:removed,
@@ -46,17 +49,18 @@ const chrome = {
     async update(id,{url}){if(!tabs.has(id))throw new Error('missing tab');const t=tabs.get(id);t.url=url;actions.push({type:'update',id,url});return t;},
     async create({url}) {const id=tabs.size+100;const tab={id,url};tabs.set(id,tab);actions.push({type:'create',id,url});return tab;}
   },
-  webNavigation:{onCommitted:committed},
-  alarms:{onAlarm:event(),create:async()=>{}},
+  webNavigation:{onCommitted:committed,onHistoryStateUpdated:historyChanged,onErrorOccurred:navigationError},
+  contextMenus:{onClicked:menuClick,removeAll:fn=>fn(),create:(_o,fn)=>fn()},
+  alarms:{onAlarm:alarmEvent,create:async()=>{}},
   action:{setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{},setTitle:async arg=>{titles.push(arg.title);}}
 };
-const ctx=vm.createContext({chrome,console,URL,Date,Promise,setTimeout,clearTimeout,importScripts:()=>{}});
+const ctx=vm.createContext({chrome,console,URL,Date,Promise,crypto:require('node:crypto').webcrypto,setTimeout,clearTimeout,importScripts:()=>{}});
 vm.runInContext(fs.readFileSync(path.join(root,'policy.js'),'utf8'),ctx);
 vm.runInContext(fs.readFileSync(path.join(root,'background.js'),'utf8'),ctx);
 const pause=async()=>new Promise(r=>setTimeout(r,15));
 const send=(request,sender)=>new Promise(resolve=>{
   let settled=false;
-  const keep=rtMessage.emit(request,sender,result=>{settled=true;resolve({handled:true,result});});
+  const keep=rtMessage.emit({build:"1.0.2-r20261125.2",...request},sender,result=>{settled=true;resolve({handled:true,result});});
   setTimeout(()=>{if(!settled) resolve({handled:false});},25);
 });
 (async()=>{
@@ -68,7 +72,7 @@ const send=(request,sender)=>new Promise(resolve=>{
   assert.equal(global.condition.resourceTypes[0],'main_frame');
   assert.ok(global.action.redirect.regexSubstitution.endsWith('\\0'));
   const parsedManifest=JSON.parse(fs.readFileSync(path.join(root,'manifest.json'),'utf8'));
-  assert.equal(parsedManifest.version,'1.0.1');
+  assert.equal(parsedManifest.version,'1.0.2');
   assert.ok(parsedManifest.permissions.includes('declarativeNetRequest'));
   assert.ok(parsedManifest.web_accessible_resources[0].resources.includes('confirm.html'));
   const fallback=JSON.parse(fs.readFileSync(path.join(root,'rules','failsafe.json'),'utf8'))[0];
@@ -99,6 +103,8 @@ const send=(request,sender)=>new Promise(resolve=>{
   committed.emit({tabId:1,frameId:0,url:target});
   await pause();
   assert.equal(session.size,1,'failed grant removal must not be reported as successful');
+  assert.equal(installed.get(2).action.type,'block','emergency barrier must cover stale grant');
+  assert.ok(installed.get(2).priority>[...session.values()][0].priority);
   const popupSender={id:'test-extension',url:'chrome-extension://test-extension/popup.html'};
   const brokenStatus=await send({type:'get-status'},popupSender);
   assert.equal(brokenStatus.result.ready,false,'active failed removal must be reported as unhealthy');
@@ -108,6 +114,7 @@ const send=(request,sender)=>new Promise(resolve=>{
   await pause();
   assert.equal(session.size,0,'allow rule must be revoked after top-level commit');
   assert.ok(installed.has(1),'global protection must remain in place');
+  assert.equal(installed.has(2),false,'emergency barrier clears only after successful cleanup');
 
   const ui=await send({type:'get-ui'},popupSender);
   assert.equal(ui.result.ui.show,true);
@@ -138,6 +145,7 @@ const send=(request,sender)=>new Promise(resolve=>{
   assert.ok(actions.some(a=>a.type==='create-incognito'&&a.options.url==='about:blank'), 'target must not load in windows.create before grant');
   assert.ok(actions.some(a=>a.type==='update'&&a.id===909&&a.url===target), 'navigate only after incognito grant');
   assert.ok(session.size>=1, 'incognito one-time grant must be present');
+  await pause();
   assert.equal(tabs.get(50).url,'about:blank', 'existing source tab must not be destroyed');
   committed.emit({tabId:909,frameId:0,url:target});
   await pause();
@@ -170,6 +178,7 @@ const send=(request,sender)=>new Promise(resolve=>{
   const latestLaunch=actions.filter(a=>a.type==='create-incognito').at(-1);
   assert.equal(latestLaunch.options.url,target,'without incognito access Chrome opens approved URL directly');
   assert.equal(session.size,grantedBefore,'must not invent an inaccessible incognito tab grant');
+  await pause();
   assert.equal(tabs.get(51).url,'about:blank','source confirm tab stays protected');
   incognitoAllowed=false;
   incognitoPolicyDisabled=true;
@@ -217,6 +226,121 @@ const send=(request,sender)=>new Promise(resolve=>{
   const repaired=await send({type:'get-status'},popupSender);
   assert.equal(repaired.result.ready,true);
   assert.equal(installed.get(1).action.type,'redirect','altered dynamic rule must be repaired');
+
+  const ruleUrl='https://list.example/Account?mode=1#fragment';
+  const ruleConfirm='chrome-extension://test-extension/confirm.html#'+ruleUrl;
+  const listSender={id:'test-extension',tab:{id:77},url:ruleConfirm,frameId:0};
+  const mgr={id:'test-extension',tab:{id:78},url:'chrome-extension://test-extension/lists.html',frameId:0};
+  tabs.set(77,{id:77,url:ruleConfirm});
+  const white={kind:'white',scope:'url',url:ruleUrl,note:'工作'};
+  const black={kind:'black',scope:'site',url:ruleUrl,note:'禁止'};
+  assert.equal((await send({type:'list-edit',op:'save',rule:white},pageSender)).handled,false,'web page may not edit lists');
+  assert.equal((await send({type:'list-all'},listSender)).handled,false,'confirmation may not enumerate lists');
+  assert.equal((await send({type:'list-edit',op:'save',rule:{...white,url:'https://evil.example/'}},listSender)).result.ok,false);
+  assert.equal((await send({type:'list-edit',op:'save',rule:{...white,url:'https://u:p@list.example/'}},mgr)).result.ok,false);
+  assert.equal((await send({type:'confirm-visit',url:ruleUrl,automatic:true},listSender)).result.ok,false,'unlisted link cannot auto approve');
+  assert.equal((await send({type:'list-edit',op:'save',url:ruleUrl,rule:white,expectedMatches:[]},listSender)).result.kind,'white');
+  assert.equal((await send({type:'list-status',url:'https://list.example/account?mode=1'},popupSender)).result.kind,'none','exact URL case sensitive');
+  assert.equal((await send({type:'confirm-visit',url:ruleUrl,automatic:true},listSender)).result.ok,true);
+  assert.ok(session.size>0,'white approval still uses existing temporary grant');
+  tabs.set(77,{id:77,url:ruleConfirm});
+  const changed=await send({type:'list-edit',op:'save',rule:black},mgr);
+  assert.equal(changed.result.ok,true);
+  assert.equal(session.size,0,'policy edit revokes old grants');
+  const blackRule=Array.from(installed.values()).find(x=>x.id>=1000);
+  assert.ok(blackRule.priority>100);
+  assert.equal(blackRule.action.redirect.regexSubstitution,'chrome-extension://test-extension/confirm.html#\\0');
+  assert.equal(new RegExp(blackRule.condition.regexFilter).exec('https://list.example/Account?mode=1')[0],'https://list.example/Account?mode=1','redirect preserves entire URL');
+  assert.ok(!new RegExp(blackRule.condition.regexFilter).test('https://list.example.evil.test/a'));
+  assert.equal((await send({type:'list-status',url:ruleUrl},popupSender)).result.kind,'black');
+  assert.equal((await send({type:'confirm-visit',url:ruleUrl},listSender)).result.ok,false);
+  incognitoAllowed=false;
+  assert.equal((await send({type:'confirm-incognito',url:ruleUrl},listSender)).result.ok,false);
+  incognitoAllowed=true;
+  tabs.set(79,{id:79,url:'https://list.example/new'});
+  historyChanged.emit({tabId:79,frameId:0,url:'https://list.example/new'});await pause();
+  assert.equal(tabs.get(79).url,'chrome-extension://test-extension/confirm.html#https://list.example/new','SPA blacklist best effort');
+  failListWrite=true;
+  assert.equal((await send({type:'list-edit',op:'delete',key:'site|https://list.example'},mgr)).result.ok,false);
+  assert.ok(Array.from(installed.values()).some(x=>x.id>=1000),'failed storage write restores black rule');
+  failListWrite=false;
+  const matchSnapshot=(await send({type:'list-status',url:ruleUrl},listSender)).result.matches;
+  assert.equal((await send({type:'list-edit',op:'save',url:ruleUrl,rule:white,expectedMatches:[]},popupSender)).result.ok,false,'stale popup write must not override new black rule');
+  assert.equal((await send({type:'list-edit',op:'save',url:ruleUrl,rule:{...white,url:'https://unrelated.test/'},expectedMatches:matchSnapshot},popupSender)).result.ok,false,'popup cannot change unrelated rule through quick UI');
+  assert.equal((await send({type:'list-edit',op:'save',url:ruleUrl,rule:white,expectedMatches:[]},listSender)).result.ok,false,'stale quick write must not overwrite newer list');
+  assert.equal((await send({type:'list-edit',op:'delete',key:'site|https://list.example',expectedMatches:[]},listSender)).result.ok,false,'stale quick removal cannot remove new rule');
+  assert.equal((await send({type:'list-edit',op:'delete',key:'site|https://list.example',expectedMatches:matchSnapshot},listSender)).result.kind,'white');
+  assert.ok(!Array.from(installed.values()).some(x=>x.id>=1000));
+  assert.equal((await send({type:'list-edit',op:'delete',key:'url|https://list.example/Account?mode=1'},mgr)).result.rows.length,0);
+  assert.equal((await send({type:'list-status',url:ruleUrl},popupSender)).result.kind,'none');
+  // 1.0.2: stale frontend, unreadable/corrupt lists and recovery without deleting data.
+  const build='1.0.2-r20261125.2';
+  const stale=await send({type:'list-status',url:ruleUrl,build:'older'},popupSender);
+  assert.equal(stale.result.code,'LEG-01');assert.equal(stale.result.build,build);
+  local.set('leg_lists_v1',[{kind:'black',scope:'url',url:'https://list.example/Account?mode=1',note:'保留'}]);
+  failListRead=true;
+  const failedRead=await send({type:'list-status',url:ruleUrl,build},popupSender);
+  assert.equal(failedRead.result.ok,false);assert.equal(failedRead.result.code,'LEG-13');
+  assert.equal((await send({type:'get-status',build},popupSender)).result.ready,false);
+  failListRead=false;
+  const listRecovered=await send({type:'list-status',url:ruleUrl,build},popupSender);
+  assert.equal(listRecovered.result.kind,'black');assert.equal(listRecovered.result.build,build);
+  assert.equal((await send({type:'get-status',build},popupSender)).result.ready,true);
+  local.set('leg_lists_v1',null);
+  assert.equal((await send({type:'list-status',url:ruleUrl,build},popupSender)).result.code,'LEG-12');
+  assert.equal(local.get('leg_lists_v1'),null,'corrupt lists must not be silently erased');
+  local.set('leg_lists_v1',[]);
+  assert.equal((await send({type:'list-status',url:ruleUrl,build},popupSender)).result.kind,'none');
+  // Batch: atomic snapshot guard, scoped authorization, local backup and restore.
+  const pathRule={kind:'black',scope:'path',url:'https://bulk.test/work/',note:'工作目录'};
+  const newWhite={kind:'white',scope:'site',url:'https://bulk.test',note:'工作'};
+  assert.equal((await send({type:'list-edit',op:'batch',expected:[],rows:[pathRule]},popupSender)).result.ok,false);
+  assert.equal((await send({type:'list-edit',op:'batch',expected:[],rows:[pathRule]},listSender)).result.ok,false);
+  assert.equal((await send({type:'list-edit',op:'batch',expected:[],rows:[pathRule]},pageSender)).handled,false);
+  assert.equal((await send({type:'list-edit',op:'batch',expected:[],rows:[pathRule,newWhite]},mgr)).result.ok,true);
+  assert.equal((await send({type:'list-status',url:'https://bulk.test/work/item'},mgr)).result.kind,'black');
+  assert.equal((await send({type:'list-status',url:'https://bulk.test/work-other/'},mgr)).result.kind,'white');
+  assert.equal((await send({type:'list-edit',op:'batch',expected:[],rows:[]},mgr)).result.ok,false,'stale writer cannot overwrite');
+  const snapshot=(await send({type:'list-all'},mgr)).result;
+  assert.equal(snapshot.rows.length,2);assert.ok(snapshot.backupAt);
+  failListWrite=true;
+  assert.equal((await send({type:'list-edit',op:'batch',expected:snapshot.rows,rows:[]},mgr)).result.ok,false);
+  assert.equal((await send({type:'list-status',url:'https://bulk.test/work/x'},mgr)).result.kind,'black');
+  failListWrite=false;
+  assert.equal((await send({type:'list-edit',op:'restore',expected:snapshot.rows},mgr)).result.rows.length,0);
+  assert.equal((await send({type:'list-edit',op:'restore',expected:[]},mgr)).result.rows.length,2);
+  assert.equal((await send({type:'list-edit',op:'batch',expected:snapshot.rows,rows:[pathRule,pathRule]},mgr)).result.ok,false);
+  const diag=(await send({type:'diagnostics'},popupSender)).result.diagnostics;
+  assert.equal(diag.ready,true);assert.ok(!JSON.stringify(diag).includes('bulk.test'));assert.equal((await send({type:'diagnostics'},pageSender)).handled,false);
+  menuClick.emit({menuItemId:'leg-manage-link',linkUrl:'https://bulk.test/work/x?token=TEST'});await pause();
+  const menuUrl=actions.findLast(x=>x.type==='create'&&x.url.startsWith('chrome-extension://test-extension/lists.html#')).url;
+  assert.ok(!menuUrl.includes('bulk.test'));const token=menuUrl.split('#')[1];
+  assert.equal((await send({type:'list-prefill',token},pageSender)).handled,false);
+  assert.equal((await send({type:'list-prefill',token},{...mgr,url:menuUrl})).result.url,'https://bulk.test/work/x?token=TEST');
+  assert.equal((await send({type:'list-prefill',token},{...mgr,url:menuUrl})).result.ok,false,'prefill token is single-use');
+  const count=actions.length;menuClick.emit({menuItemId:'leg-manage-link',linkUrl:'javascript:alert(1)'});await pause();assert.equal(actions.length,count);
+  installed.delete(1);alarmEvent.emit({name:'leg-expire-grants'});await pause();assert.equal(installed.get(1).action.type,'redirect','alarm repairs global rule');
+  const errorUrl='https://other.test/test',errorConfirm='chrome-extension://test-extension/confirm.html#'+errorUrl;
+  tabs.set(83,{id:83,url:errorConfirm});const errorSender={id:'test-extension',tab:{id:83},url:errorConfirm,frameId:0};
+  assert.equal((await send({type:'confirm-visit',url:errorUrl},errorSender)).result.ok,true);
+  navigationError.emit({frameId:0,tabId:83,url:errorUrl});await pause();assert.equal(session.size,0,'matching navigation error revokes grant');
+  // Audit: stale confirmation after asynchronous rule installation must not
+  // overwrite a newer URL. Revoke its just-created grant.
+  tabs.set(84,{id:84,url:errorConfirm});const staleSender={...errorSender,tab:{id:84}};
+  afterGrantInstall=()=>{tabs.get(84).pendingUrl='https://other.test/new';};
+  const staleOpen=await send({type:'confirm-visit',url:errorUrl},staleSender);
+  assert.equal(staleOpen.result.ok,false);assert.equal(staleOpen.result.reason,'确认页已失效');
+  assert.equal(tabs.get(84).url,errorConfirm);assert.equal(session.size,0);
+  // Reject inactive confirmations and recover unexpected extension-owned rules.
+  installed.set(42,{id:42,priority:1000,action:{type:'allow'},condition:{resourceTypes:['main_frame']}});
+  session.set(43,{id:43,priority:1000,action:{type:'allow'},condition:{resourceTypes:['main_frame']}});
+  assert.equal((await send({type:'get-status'},popupSender)).result.ready,true);
+  assert.equal(installed.has(42),false);assert.equal(session.has(43),false);
+  tabs.set(85,{id:85,url:errorConfirm});const alteredSender={...errorSender,tab:{id:85}};
+  assert.equal((await send({type:'confirm-visit',url:errorUrl},alteredSender)).result.ok,true);
+  const altered=[...session.values()][0];session.set(altered.id,{...altered,priority:1000});
+  assert.equal((await send({type:'get-status'},popupSender)).result.ready,true);
+  assert.equal(session.size,0,'altered grant must be revoked');
   const log=JSON.stringify(local.get('leg_events'));
   assert.ok(!log.includes('teams%20url'),'logs must not persist URL paths');
   assert.ok(!log.includes('#section'),'logs must not persist URL fragments');
